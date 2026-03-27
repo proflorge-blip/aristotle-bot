@@ -4,6 +4,7 @@ Twice-daily Sui blockchain intelligence brief
 Pipeline: Fetch → Calculate → Format → Post → Store
 """
 
+
 import requests
 import sqlite3
 import json
@@ -14,11 +15,9 @@ from statistics import mean, stdev
 # ─────────────────────────────────────────
 # CONFIGURATION — fill in your values
 # ─────────────────────────────────────────
-
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-FREE_CHANNEL_ID    = "YOUR_FREE_CHANNEL_ID_HERE"    # e.g. @suiupdate or -1001234567890
-PAID_CHANNEL_ID    = "YOUR_PAID_CHANNEL_ID_HERE"    # e.g. -1009876543210
-
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+FREE_CHANNEL_ID    = os.environ.get("FREE_CHANNEL_ID")
+PAID_CHANNEL_ID    = os.environ.get("PAID_CHANNEL_ID")
 DB_PATH = "aristotle.db"
 
 # ─────────────────────────────────────────
