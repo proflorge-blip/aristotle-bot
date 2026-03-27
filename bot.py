@@ -14,11 +14,10 @@ from statistics import mean, stdev
 # ─────────────────────────────────────────
 # CONFIGURATION — fill in your values
 # ─────────────────────────────────────────
-import os
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-FREE_CHANNEL_ID    = os.environ.get("FREE_CHANNEL_ID")
-PAID_CHANNEL_ID    = os.environ.get("PAID_CHANNEL_ID")
+TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+FREE_CHANNEL_ID    = "YOUR_FREE_CHANNEL_ID_HERE"    # e.g. @suiupdate or -1001234567890
+PAID_CHANNEL_ID    = "YOUR_PAID_CHANNEL_ID_HERE"    # e.g. -1009876543210
 
 DB_PATH = "aristotle.db"
 
@@ -541,12 +540,12 @@ def format_paid_brief(data: dict) -> str:
 # ─────────────────────────────────────────
 
 def post_to_telegram(channel_id: str, message: str) -> bool:
-    """Post a message to a Telegram channel."""
+    """Post a message to a Telegram channel using plain monospace text."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": channel_id,
-        "text": f"```\n{message}\n```",
-        "parse_mode": "MarkdownV2",
+        "text": f"<pre>{message}</pre>",
+        "parse_mode": "HTML",
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
