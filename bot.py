@@ -4,7 +4,7 @@ Twice-daily Sui blockchain intelligence brief
 Pipeline: Fetch → Calculate → Format → Post → Store
 """
 
-
+import os
 import requests
 import sqlite3
 import json
