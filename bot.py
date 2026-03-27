@@ -14,10 +14,11 @@ from statistics import mean, stdev
 # ─────────────────────────────────────────
 # CONFIGURATION — fill in your values
 # ─────────────────────────────────────────
+import os
 
-TELEGRAM_BOT_TOKEN = "8503764358:AAHTCYD15GvjcBSrPXyk5eF4iRGRgbCuTwU"
-FREE_CHANNEL_ID    = "@aristotlesuiupdate"    # e.g. @suiupdate or -1001234567890
-PAID_CHANNEL_ID    = "@aristotlesuilogos"    # e.g. -1009876543210
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+FREE_CHANNEL_ID    = os.environ.get("FREE_CHANNEL_ID")
+PAID_CHANNEL_ID    = os.environ.get("PAID_CHANNEL_ID")
 
 DB_PATH = "aristotle.db"
 
