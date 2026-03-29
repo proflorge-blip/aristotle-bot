@@ -444,6 +444,8 @@ def format_paid_brief(data: dict) -> str:
     if prev_addr and curr_addr:
         addr_change = ((curr_addr - prev_addr) / prev_addr) * 100
         addr_str += f"    {fmt_pct(addr_change)}"
+    else:
+        addr_str += "    –"
 
     # DeepBook with change
     prev_db = get_previous_value("deepbook_liquidity")
@@ -452,6 +454,8 @@ def format_paid_brief(data: dict) -> str:
     if prev_db and curr_db and prev_db > 0:
         db_change = ((curr_db - prev_db) / prev_db) * 100
         db_str += f"   {fmt_pct(db_change)}"
+    else:
+        db_str += "   –"
 
     # Mean reversion with change vs previous
     prev_mr = get_previous_value("mean_reversion")
@@ -460,6 +464,8 @@ def format_paid_brief(data: dict) -> str:
     if prev_mr is not None and curr_mr is not None:
         mr_change = curr_mr - prev_mr
         mr_str += f"    {fmt_change(mr_change)}"
+    else:
+        mr_str += "    –"
 
     # Logos Index with arrow and point change
     prev_logos = get_previous_value("logos_index")
@@ -469,6 +475,8 @@ def format_paid_brief(data: dict) -> str:
         delta = curr_logos - prev_logos
         arrow = "▲" if delta >= 0 else "▼"
         logos_str += f"  {arrow} {abs(delta):.1f}"
+    else:
+        logos_str += "  –"
 
     lines = [
         "ARISTOTLE · SUI LOGOS",
