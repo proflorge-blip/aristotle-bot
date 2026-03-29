@@ -191,20 +191,27 @@ def fetch_defillama() -> dict:
     log.info("Fetching DeFiLlama TVL...")
     result = {"tvl": None, "tvl_change_24h": None}
     try:
-        r = requests.get("https://api.llama.fi/v2/chains", timeout=10)
-        r.raise_for_status()
-        for chain in r.json():
+        # Primary: historical TVL endpoint gives us current + previous to calc change
+        r = requests.get("https://api.llama.fi/v2/historicalChainTvl/Sui", timeout=10)
+        if r.status_code == 200:
+            history = r.json()
+            if len(history) >= 2:
+                current = history[-1].get("tvl")
+                previous = history[-2].get("tvl")
+                result["tvl"] = current
+                if current and previous and previous > 0:
+                    result["tvl_change_24h"] = ((current - previous) / previous) * 100
+                log.info(f"DeFiLlama: TVL=${current:,.0f} change={result['tvl_change_24h']}")
+                return result
+
+        # Fallback: chains endpoint
+        r2 = requests.get("https://api.llama.fi/v2/chains", timeout=10)
+        r2.raise_for_status()
+        for chain in r2.json():
             if chain.get("name", "").lower() == "sui":
                 result["tvl"] = chain.get("tvl")
                 result["tvl_change_24h"] = chain.get("change_1d")
                 break
-        if result["tvl"] is not None and result["tvl_change_24h"] is None:
-            try:
-                r2 = requests.get("https://api.llama.fi/summary/chains/Sui", timeout=10)
-                if r2.status_code == 200:
-                    result["tvl_change_24h"] = r2.json().get("change_1d")
-            except Exception:
-                pass
         log.info(f"DeFiLlama: TVL=${result['tvl']:,.0f}" if result["tvl"] else "DeFiLlama: not found")
     except Exception as e:
         log.error(f"DeFiLlama fetch failed: {e}")
@@ -237,31 +244,75 @@ def fetch_sui_rpc() -> dict:
 
 
 def fetch_deepbook() -> dict:
+    """
+    Fetch DeepBook SUI/USDC 24h volume from Mysten Labs indexer.
+    Volumes are in smallest asset units — divide by 10^9 for SUI (9 decimals).
+    Fallback: DeFiLlama DeepBook protocol volume.
+    """
     log.info("Fetching DeepBook liquidity...")
     result = {"deepbook_liquidity": None}
-    endpoints = [
-        "https://deepbook-indexer.mainnet.mystenlabs.com/get_pools",
-        "https://api.deepbook.sui.io/pools",
-    ]
-    for endpoint in endpoints:
-        try:
-            r = requests.get(endpoint, timeout=10)
-            if r.status_code == 200:
-                pools = r.json()
-                if isinstance(pools, dict):
-                    pools = pools.get("pools", pools.get("data", []))
-                for pool in pools:
-                    base = pool.get("base_asset_name", "") or pool.get("base_coin", "")
-                    quote = pool.get("quote_asset_name", "") or pool.get("quote_coin", "")
-                    if "SUI" in base.upper() and "USDC" in quote.upper():
-                        vol = pool.get("base_asset_trading_volume") or pool.get("volume_24h") or 0
-                        result["deepbook_liquidity"] = float(vol)
-                        log.info(f"DeepBook: SUI/USDC={vol}")
-                        return result
-        except Exception as e:
-            log.warning(f"DeepBook {endpoint} failed: {e}")
+
+    SUI_SCALAR = 10 ** 9  # SUI has 9 decimal places
+
+    # Primary: Mysten Labs DeepBook V3 indexer
+    try:
+        # Get all pools
+        r = requests.get(
+            "https://deepbook-indexer.mainnet.mystenlabs.com/get_pools",
+            timeout=10
+        )
+        if r.status_code == 200:
+            pools = r.json()
+            log.info(f"DeepBook pools response: {str(pools)[:200]}")
+
+            # Find SUI/USDC pool
+            sui_usdc_pool_id = None
+            for pool in pools:
+                name = pool.get("pool_name", "")
+                if "SUI" in name.upper() and "USDC" in name.upper():
+                    sui_usdc_pool_id = pool.get("pool_id")
+                    log.info(f"Found SUI/USDC pool: {sui_usdc_pool_id}")
+                    break
+
+            if sui_usdc_pool_id:
+                # Fetch 24h volume for this pool
+                vol_url = f"https://deepbook-indexer.mainnet.mystenlabs.com/get_net_deposits"
+                vol_r = requests.get(
+                    f"https://deepbook-indexer.mainnet.mystenlabs.com/24h_volume/{sui_usdc_pool_id}",
+                    timeout=10
+                )
+                if vol_r.status_code == 200:
+                    vol_data = vol_r.json()
+                    log.info(f"DeepBook volume raw: {str(vol_data)[:200]}")
+                    # Volume is in base asset units (SUI), divide by scalar
+                    raw_vol = vol_data.get("base_volume") or vol_data.get("volume") or vol_data.get("base_asset_volume") or 0
+                    result["deepbook_liquidity"] = float(raw_vol) / SUI_SCALAR
+                    log.info(f"DeepBook: SUI/USDC 24h vol = {result['deepbook_liquidity']:,.0f} SUI")
+                    return result
+                else:
+                    log.warning(f"DeepBook volume endpoint: {vol_r.status_code} — {vol_r.text[:100]}")
+        else:
+            log.warning(f"DeepBook pools: {r.status_code}")
+
+    except Exception as e:
+        log.warning(f"DeepBook primary failed: {e}")
+
+    # Fallback: DeFiLlama DeepBook protocol
+    try:
+        r2 = requests.get("https://api.llama.fi/summary/dexs/deepbook?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume", timeout=10)
+        if r2.status_code == 200:
+            data = r2.json()
+            vol = data.get("total24h") or data.get("totalVolume24h")
+            if vol:
+                result["deepbook_liquidity"] = float(vol)
+                log.info(f"DeepBook (DeFiLlama fallback): ${vol:,.0f}")
+                return result
+        log.warning(f"DeepBook DeFiLlama fallback: {r2.status_code}")
+    except Exception as e:
+        log.warning(f"DeepBook DeFiLlama fallback failed: {e}")
+
     result["deepbook_liquidity"] = 0
-    log.warning("DeepBook: all endpoints failed, using 0")
+    log.warning("DeepBook: all sources failed, using 0")
     return result
 
 
@@ -361,7 +412,7 @@ def fmt_change(value):
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "08:00" if now.hour < 14 else "20:00"
+    session = now.strftime("%H:%M")
     sep = "─" * 24
 
     leader_str = "—"
@@ -383,7 +434,7 @@ def format_free_brief(data: dict) -> str:
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "08:00" if now.hour < 14 else "20:00"
+    session = now.strftime("%H:%M")
     sep = "─" * 26
 
     # Active addresses with change
