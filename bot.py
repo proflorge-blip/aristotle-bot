@@ -25,6 +25,12 @@ DB_PATH = "aristotle.db"
 
 STABLECOINS = {"USDC", "USDT", "USDE", "DAI", "BUCK", "SUIUSD", "AUSD", "FDUSD"}
 
+# X (Twitter) credentials — add once developer account approved
+X_API_KEY            = os.environ.get("X_API_KEY")
+X_API_SECRET         = os.environ.get("X_API_SECRET")
+X_ACCESS_TOKEN       = os.environ.get("X_ACCESS_TOKEN")
+X_ACCESS_TOKEN_SECRET = os.environ.get("X_ACCESS_TOKEN_SECRET")
+
 # ─────────────────────────────────────────
 # LOGGING
 # ─────────────────────────────────────────
@@ -424,7 +430,7 @@ def format_free_brief(data: dict) -> str:
         f"{now.strftime('%d %b %Y')} · {session} UTC",
         sep,
         f"PRICE      {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
-        f"CAPITAL    {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
+        f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
         f"DEX FLOW   {fmt_large(data.get('dex_volume'))}",
         sep,
         "@aristotlesuiupdate",
@@ -518,6 +524,102 @@ def post_to_telegram(channel_id: str, message: str) -> bool:
 
 
 # ─────────────────────────────────────────
+# X (TWITTER) POSTING
+# ─────────────────────────────────────────
+
+def format_x_brief(data: dict) -> str:
+    """Format a compact brief for X — shorter, no monospace columns."""
+    now = datetime.now(timezone.utc)
+    price = fmt_price(data.get("sui_price"))
+    price_chg = fmt_pct(data.get("sui_price_change_24h"))
+    tvl = fmt_large(data.get("tvl"))
+    tvl_chg = fmt_pct(data.get("tvl_change_24h"))
+    dex = fmt_large(data.get("dex_volume"))
+
+    leader_str = ""
+    if data.get("best_token_symbol") and data.get("best_token_change") is not None:
+        leader_str = f"\nLEADER  {data['best_token_symbol']} {fmt_pct(data['best_token_change'])}"
+
+    return (
+        f"ARISTOTLE · SUI UPDATE\n"
+        f"{now.strftime('%d %b %Y')} · {now.strftime('%H:%M')} UTC\n"
+        f"\n"
+        f"PRICE    {price} {price_chg}\n"
+        f"CAPITAL  {tvl} {tvl_chg}\n"
+        f"DEX FLOW {dex}"
+        f"{leader_str}\n"
+        f"\n@aristotlesuiupdate"
+    )
+
+
+def post_to_x(message: str) -> bool:
+    """Post to X using OAuth 1.0a."""
+    if not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET]):
+        log.warning("X credentials not set — skipping X post")
+        return False
+    try:
+        import hmac
+        import hashlib
+        import base64
+        import urllib.parse
+        import time as time_mod
+        import uuid
+
+        url = "https://api.twitter.com/2/tweets"
+        method = "POST"
+
+        # OAuth 1.0a signature
+        oauth_timestamp = str(int(time_mod.time()))
+        oauth_nonce = uuid.uuid4().hex
+
+        oauth_params = {
+            "oauth_consumer_key": X_API_KEY,
+            "oauth_nonce": oauth_nonce,
+            "oauth_signature_method": "HMAC-SHA1",
+            "oauth_timestamp": oauth_timestamp,
+            "oauth_token": X_ACCESS_TOKEN,
+            "oauth_version": "1.0",
+        }
+
+        # Build signature base string
+        params_string = "&".join(
+            f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
+            for k, v in sorted(oauth_params.items())
+        )
+        base_string = "&".join([
+            method,
+            urllib.parse.quote(url, safe=""),
+            urllib.parse.quote(params_string, safe=""),
+        ])
+
+        # Sign
+        signing_key = f"{urllib.parse.quote(X_API_SECRET, safe='')}&{urllib.parse.quote(X_ACCESS_TOKEN_SECRET, safe='')}"
+        signature = base64.b64encode(
+            hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
+        ).decode()
+
+        oauth_params["oauth_signature"] = signature
+        auth_header = "OAuth " + ", ".join(
+            f'{urllib.parse.quote(k, safe="")}="{urllib.parse.quote(v, safe="")}"'
+            for k, v in sorted(oauth_params.items())
+        )
+
+        r = requests.post(
+            url,
+            headers={"Authorization": auth_header, "Content-Type": "application/json"},
+            json={"text": message},
+            timeout=10,
+        )
+        r.raise_for_status()
+        log.info("Posted to X")
+        return True
+
+    except Exception as e:
+        log.error(f"X post failed: {e}")
+        return False
+
+
+# ─────────────────────────────────────────
 # MAIN PIPELINE
 # ─────────────────────────────────────────
 
@@ -557,6 +659,10 @@ def run():
 
     post_to_telegram(FREE_CHANNEL_ID, free_brief)
     post_to_telegram(PAID_CHANNEL_ID, paid_brief)
+
+    # Post free brief to X
+    x_brief = format_x_brief(data)
+    post_to_x(x_brief)
 
     save_snapshot(data)
     log.info("═══ PIPELINE COMPLETE ═══")
