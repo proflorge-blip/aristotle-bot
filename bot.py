@@ -59,7 +59,9 @@ def init_db():
             tvl_change_24h REAL,
             active_addresses INTEGER,
             deepbook_liquidity REAL,
+            deepbook_ema REAL,
             deepbook_change REAL,
+            staking_ratio REAL,
             mean_reversion REAL,
             mean_reversion_prev REAL,
             logos_index REAL,
@@ -78,9 +80,9 @@ def save_snapshot(data: dict):
         INSERT INTO snapshots_v3 (
             timestamp, sui_price, sui_price_change_24h, dex_volume,
             tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
-            deepbook_change, mean_reversion, mean_reversion_prev,
-            logos_index, best_token_symbol, best_token_change
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            deepbook_ema, deepbook_change, staking_ratio, mean_reversion,
+            mean_reversion_prev, logos_index, best_token_symbol, best_token_change
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get("timestamp"),
         data.get("sui_price"),
@@ -90,7 +92,9 @@ def save_snapshot(data: dict):
         data.get("tvl_change_24h"),
         data.get("active_addresses"),
         data.get("deepbook_liquidity"),
+        data.get("deepbook_ema"),
         data.get("deepbook_change"),
+        data.get("staking_ratio"),
         data.get("mean_reversion"),
         data.get("mean_reversion_prev"),
         data.get("logos_index"),
@@ -322,15 +326,74 @@ def fetch_deepbook() -> dict:
     return result
 
 
+def fetch_staking() -> dict:
+    """
+    Fetch SUI staking ratio from Sui RPC.
+    Returns staking_ratio as a float (e.g. 0.65 = 65% staked).
+    """
+    log.info("Fetching staking ratio...")
+    result = {"staking_ratio": None, "total_staked": None}
+    try:
+        url = "https://fullnode.mainnet.sui.io:443"
+        r = requests.post(url, json={
+            "jsonrpc": "2.0", "id": 1,
+            "method": "suix_getLatestSuiSystemState", "params": []
+        }, timeout=10)
+        r.raise_for_status()
+        state = r.json().get("result", {})
+
+        total_staked = int(state.get("totalStake", 0))
+        # Total supply is ~10B SUI, in MIST (1 SUI = 1e9 MIST)
+        TOTAL_SUPPLY_MIST = 10_000_000_000 * 1_000_000_000
+        if total_staked > 0:
+            result["total_staked"] = total_staked / 1_000_000_000  # Convert to SUI
+            result["staking_ratio"] = total_staked / TOTAL_SUPPLY_MIST
+            log.info(f"Staking: {result['staking_ratio']:.1%} staked ({result['total_staked']:,.0f} SUI)")
+        else:
+            log.warning("Staking: no data returned")
+    except Exception as e:
+        log.error(f"Staking fetch failed: {e}")
+    return result
+
+
+def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
+    """
+    Calculate 7-day EMA of DeepBook liquidity from DB snapshots.
+    Smooths intraday spikes.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT deepbook_liquidity FROM snapshots_v3 ORDER BY id DESC LIMIT ?", (days * 2,))
+        rows = c.fetchall()
+        conn.close()
+        values = [r[0] for r in rows if r[0] is not None and r[0] > 0]
+    except Exception:
+        values = []
+
+    if not values:
+        return current_value or 0
+
+    # EMA calculation
+    k = 2 / (days + 1)
+    ema = values[-1]  # Start from oldest
+    for v in reversed(values[:-1]):
+        ema = v * k + ema * (1 - k)
+    # Include current value in EMA
+    ema = current_value * k + ema * (1 - k)
+    return round(ema, 2)
+
+
 # ─────────────────────────────────────────
 # LOGOS INDEX
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "active_addresses": 0.30,
-    "tvl":              0.28,
-    "deepbook":         0.20,
-    "mean_reversion":   0.12,
+    "tvl":              0.24,
+    "active_addresses": 0.20,
+    "staking_ratio":    0.18,
+    "deepbook":         0.15,
+    "mean_reversion":   0.13,
     "sui_price":        0.10,
 }
 
@@ -339,6 +402,7 @@ RANGES = {
     "tvl":              {"min": 200_000_000,   "max": 2_000_000_000},
     "deepbook":         {"min": 0,             "max": 10_000_000},
     "sui_price":        {"min": 0.5,           "max": 10.0},
+    "staking_ratio":    {"min": 0.40,          "max": 0.80},  # % of SUI staked (40-80%)
 }
 
 DAMPENING_CAP = 10.0
@@ -365,9 +429,10 @@ def zscore_to_score(z: float) -> float:
 
 def calculate_logos_index(data: dict, previous_index: float = None) -> float:
     scores = {
-        "active_addresses": normalise(data.get("active_addresses"), RANGES["active_addresses"]["min"], RANGES["active_addresses"]["max"]),
         "tvl":              normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
-        "deepbook":         normalise(data.get("deepbook_liquidity"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
+        "active_addresses": normalise(data.get("active_addresses"), RANGES["active_addresses"]["min"], RANGES["active_addresses"]["max"]),
+        "staking_ratio":    normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
+        "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
         "mean_reversion":   zscore_to_score(data.get("mean_reversion", 0.0) or 0.0),
         "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
     }
@@ -418,12 +483,22 @@ def fmt_change(value):
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = now.strftime("%H:%M")
+    session = "07:00" if now.hour < 14 else "21:00"
     sep = "─" * 24
 
     leader_str = "—"
     if data.get("best_token_symbol") and data.get("best_token_change") is not None:
         leader_str = f"{data['best_token_symbol']} {fmt_pct(data['best_token_change'])}"
+
+    # DEX VOL with change vs previous snapshot
+    prev_dex = get_previous_value("dex_volume")
+    curr_dex = data.get("dex_volume")
+    dex_str = fmt_large(curr_dex)
+    if prev_dex and curr_dex and prev_dex > 0:
+        dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
+        dex_str += f"   {fmt_pct(dex_change)}"
+    else:
+        dex_str += "   –"
 
     lines = [
         "ARISTOTLE · SUI UPDATE",
@@ -431,7 +506,7 @@ def format_free_brief(data: dict) -> str:
         sep,
         f"PRICE      {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
-        f"DEX FLOW   {fmt_large(data.get('dex_volume'))}",
+        f"DEX VOL    {dex_str}",
         sep,
         "@aristotlesuiupdate",
     ]
@@ -440,7 +515,7 @@ def format_free_brief(data: dict) -> str:
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = now.strftime("%H:%M")
+    session = "07:00" if now.hour < 14 else "21:00"
     sep = "─" * 26
 
     # Active addresses with change
@@ -491,6 +566,7 @@ def format_paid_brief(data: dict) -> str:
         "",
         f"PRICE          {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
+        f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"ACTIVE ADDR    {addr_str}",
         f"DEEPBOOK       {db_str}",
         f"MEAN REV       {mr_str}",
@@ -546,7 +622,7 @@ def format_x_brief(data: dict) -> str:
         f"\n"
         f"PRICE    {price} {price_chg}\n"
         f"CAPITAL  {tvl} {tvl_chg}\n"
-        f"DEX FLOW {dex}"
+        f"DEX VOL  {dex}"
         f"{leader_str}\n"
         f"\n@aristotlesuiupdate"
     )
@@ -627,12 +703,17 @@ def run():
     log.info("═══ ARISTOTLE PIPELINE START ═══")
     init_db()
 
-    cg  = fetch_coingecko()
-    dl  = fetch_defillama()
-    rpc = fetch_sui_rpc()
-    db  = fetch_deepbook()
+    cg      = fetch_coingecko()
+    dl      = fetch_defillama()
+    rpc     = fetch_sui_rpc()
+    db      = fetch_deepbook()
+    staking = fetch_staking()
 
-    data = {**cg, **dl, **rpc, **db}
+    data = {**cg, **dl, **rpc, **db, **staking}
+
+    # Calculate 7-day EMA for DeepBook
+    data["deepbook_ema"] = calculate_deepbook_ema(data.get("deepbook_liquidity") or 0)
+    log.info(f"DeepBook EMA (7d): {data['deepbook_ema']:,.0f}")
     data["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     # Mean reversion

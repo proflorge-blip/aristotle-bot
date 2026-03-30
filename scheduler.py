@@ -23,10 +23,10 @@ def job():
         log.error(f"Pipeline error: {e}")
 
 # Schedule twice daily at UTC
-schedule.every().day.at("08:00").do(job)
-schedule.every().day.at("20:00").do(job)
+schedule.every().day.at("07:00").do(job)
+schedule.every().day.at("21:00").do(job)
 
-log.info("Scheduler started. Running at 08:00 and 20:00 UTC.")
+log.info("Scheduler started. Running at 07:00 and 21:00 UTC.")
 
 while True:
     schedule.run_pending()
