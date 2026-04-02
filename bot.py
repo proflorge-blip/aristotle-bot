@@ -596,9 +596,9 @@ def format_paid_brief(data: dict) -> str:
     mr_str = f"{curr_mr:+.2f}" if curr_mr is not None else "—"
     if prev_mr is not None and curr_mr is not None:
         mr_change = curr_mr - prev_mr
-        mr_str += f"    {fmt_change(mr_change)}"
+        mr_str += f"     {fmt_change(mr_change)}"
     else:
-        mr_str += "    +0.00"
+        mr_str += "     +0.00"
 
     # Logos Index with arrow and point change
     prev_logos = get_previous_value("logos_index")
@@ -621,7 +621,7 @@ def format_paid_brief(data: dict) -> str:
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"ACTIVE ADDR    {addr_str}",
         f"DEEPBOOK       {db_str}",
-        f"MEAN REV       {mr_str}σ",
+        f"MEAN REV       {mr_str} σ",
         "",
         sep,
         f"LOGOS INDEX    {logos_str}",
