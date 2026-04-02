@@ -25,6 +25,9 @@ DB_PATH = "aristotle.db"
 
 STABLECOINS = {"USDC", "USDT", "USDE", "DAI", "BUCK", "SUIUSD", "AUSD", "FDUSD"}
 
+# Blockberry API key — add once account approved at blockberry.one
+BLOCKBERRY_API_KEY = os.environ.get("BLOCKBERRY_API_KEY")
+
 # X (Twitter) credentials — add once developer account approved
 X_API_KEY            = os.environ.get("X_API_KEY")
 X_API_SECRET         = os.environ.get("X_API_SECRET")
@@ -326,6 +329,44 @@ def fetch_deepbook() -> dict:
     return result
 
 
+def fetch_active_addresses_blockberry() -> dict:
+    """
+    Fetch real 24h Daily Active Users from Blockberry (Suiscan) API.
+    Requires BLOCKBERRY_API_KEY environment variable.
+    Falls back to RPC proxy if key not available.
+    """
+    result = {"active_addresses": None}
+
+    if not BLOCKBERRY_API_KEY:
+        log.info("Blockberry API key not set — using RPC proxy for active addresses")
+        return result
+
+    try:
+        url = "https://api.blockberry.one/sui/v1/network/stats"
+        headers = {"x-api-key": BLOCKBERRY_API_KEY}
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            # Try common field names for DAUs
+            dau = (
+                data.get("dailyActiveAddresses") or
+                data.get("active_addresses_24h") or
+                data.get("dau") or
+                data.get("activeAddresses")
+            )
+            if dau:
+                result["active_addresses"] = int(dau)
+                log.info(f"Blockberry: {dau:,} DAUs")
+            else:
+                log.warning(f"Blockberry: DAU field not found in response: {list(data.keys())}")
+        else:
+            log.warning(f"Blockberry: {r.status_code}")
+    except Exception as e:
+        log.error(f"Blockberry fetch failed: {e}")
+
+    return result
+
+
 def fetch_staking() -> dict:
     """
     Fetch SUI staking ratio from Sui RPC.
@@ -483,7 +524,7 @@ def fmt_change(value):
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "07:00" if now.hour < 14 else "21:00"
+    session = "07:00 UTC · Morning" if now.hour < 14 else "21:00 UTC · Evening"
     sep = "─" * 24
 
     leader_str = "—"
@@ -500,22 +541,33 @@ def format_free_brief(data: dict) -> str:
     else:
         dex_str += "   –"
 
+    # Show Logos Index teaser on Monday 07:00 and Friday 21:00
+    show_logos = (
+        (now.weekday() == 0 and now.hour < 14) or   # Monday morning
+        (now.weekday() == 4 and now.hour >= 14)       # Friday evening
+    )
+    logos = data.get("logos_index")
+    logos_teaser = f"{logos:.1f}/100" if logos is not None else "—"
+
     lines = [
         "ARISTOTLE · SUI UPDATE",
-        f"{now.strftime('%d %b %Y')} · {session} UTC",
+        f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         f"PRICE      {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
         f"DEX VOL    {dex_str}",
-        sep,
-        "@aristotlesuiupdate",
     ]
+    if show_logos:
+        lines.append(sep)
+        lines.append(f"LOGOS INDEX  {logos_teaser}")
+    lines.append(sep)
+    lines.append("@aristotlesuiupdate")
     return "\n".join(lines)
 
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "07:00" if now.hour < 14 else "21:00"
+    session = "07:00 UTC · Morning" if now.hour < 14 else "21:00 UTC · Evening"
     sep = "─" * 26
 
     # Active addresses with change
@@ -561,7 +613,7 @@ def format_paid_brief(data: dict) -> str:
 
     lines = [
         "ARISTOTLE · SUI LOGOS",
-        f"{now.strftime('%d %b %Y')} · {session} UTC",
+        f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         "",
         f"PRICE          {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
@@ -569,7 +621,7 @@ def format_paid_brief(data: dict) -> str:
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"ACTIVE ADDR    {addr_str}",
         f"DEEPBOOK       {db_str}",
-        f"MEAN REV       {mr_str}",
+        f"MEAN REV    σ  {mr_str}",
         "",
         sep,
         f"LOGOS INDEX    {logos_str}",
