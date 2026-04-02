@@ -607,9 +607,9 @@ def format_paid_brief(data: dict) -> str:
     if prev_logos is not None and curr_logos is not None:
         delta = curr_logos - prev_logos
         arrow = "▲" if delta >= 0 else "▼"
-        logos_str += f"  {arrow} {abs(delta):.1f}"
+        logos_str += f"  {arrow}"
     else:
-        logos_str += "  +0.0"
+        logos_str += "  ▲"
 
     lines = [
         "ARISTOTLE · SUI LOGOS",
