@@ -586,9 +586,9 @@ def format_paid_brief(data: dict) -> str:
     db_str = fmt_large(curr_db)
     if prev_db and curr_db and prev_db > 0:
         db_change = ((curr_db - prev_db) / prev_db) * 100
-        db_str += f"   {fmt_pct(db_change)}"
+        db_str += f"    {fmt_pct(db_change)}"
     else:
-        db_str += "   +0.0%"
+        db_str += "    +0.0%"
 
     # Mean reversion with change vs previous
     prev_mr = get_previous_value("mean_reversion")
@@ -621,7 +621,7 @@ def format_paid_brief(data: dict) -> str:
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"ACTIVE ADDR    {addr_str}",
         f"DEEPBOOK       {db_str}",
-        f"MEAN REV       {mr_str} σ",
+        f"MEAN REV       {mr_str}σ",
         "",
         sep,
         f"LOGOS INDEX    {logos_str}",
