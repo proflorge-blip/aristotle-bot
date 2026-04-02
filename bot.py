@@ -621,7 +621,7 @@ def format_paid_brief(data: dict) -> str:
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"ACTIVE ADDR    {addr_str}",
         f"DEEPBOOK       {db_str}",
-        f"MEAN REV       {mr_str} σ",
+        f"MEAN REV       {mr_str}σ",
         "",
         sep,
         f"LOGOS INDEX    {logos_str}",
