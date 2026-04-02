@@ -524,8 +524,7 @@ def fmt_change(value):
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "07:00 UTC"
-    session_label = "MORNING" if now.hour < 14 else "EVENING"
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "21:00 UTC · EVENING"
     sep = "─" * 24
 
     leader_str = "—"
@@ -553,7 +552,6 @@ def format_free_brief(data: dict) -> str:
     lines = [
         "ARISTOTLE · SUI UPDATE",
         f"{now.strftime('%d %b %Y')} · {session}",
-        session_label,
         sep,
         f"PRICE      {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
@@ -569,8 +567,7 @@ def format_free_brief(data: dict) -> str:
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "07:00 UTC"
-    session_label = "MORNING" if now.hour < 14 else "EVENING"
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "21:00 UTC · EVENING"
     sep = "─" * 26
 
     # Active addresses with change
@@ -617,7 +614,6 @@ def format_paid_brief(data: dict) -> str:
     lines = [
         "ARISTOTLE · SUI LOGOS",
         f"{now.strftime('%d %b %Y')} · {session}",
-        session_label,
         sep,
         "",
         f"PRICE          {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
