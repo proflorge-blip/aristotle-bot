@@ -133,58 +133,56 @@ def get_previous_value(column: str):
 # DATA FETCHERS
 # ─────────────────────────────────────────
 
-def fetch_coingecko() -> dict:
-    log.info("Fetching CoinGecko data...")
-    result = {
-        "sui_price": None,
-        "sui_price_change_24h": None,
-        "dex_volume": None,
-        "best_token_symbol": None,
-        "best_token_change": None,
-    }
-    headers = {"accept": "application/json"}
-
-    for attempt in range(3):
-        try:
-            url = "https://api.coingecko.com/api/v3/simple/price"
-            params = {
-                "ids": "sui",
-                "vs_currencies": "usd",
-                "include_24hr_change": "true",
-                "include_24hr_vol": "true",
-            }
-            r = requests.get(url, params=params, headers=headers, timeout=15)
-            if r.status_code == 429:
-                wait = 60 * (attempt + 1)
-                log.warning(f"CoinGecko rate limited, waiting {wait}s...")
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            data = r.json().get("sui", {})
-            result["sui_price"] = data.get("usd")
-            result["sui_price_change_24h"] = data.get("usd_24h_change")
-            result["dex_volume"] = data.get("usd_24h_vol")
-            log.info(f"CoinGecko: SUI=${result['sui_price']} ({result['sui_price_change_24h']:+.2f}%)")
-            break
-        except Exception as e:
-            log.error(f"CoinGecko price attempt {attempt+1} failed: {e}")
-            time.sleep(10)
-
-    # Top Sui ecosystem token (filter stablecoins + SUI)
+def fetch_price_binance() -> dict:
+    """
+    Fetch SUI price and 24h change from Binance public API.
+    No API key required. No rate limits for basic ticker data.
+    Primary price source.
+    """
+    result = {"sui_price": None, "sui_price_change_24h": None, "dex_volume": None}
     try:
-        time.sleep(3)
-        cat_url = "https://api.coingecko.com/api/v3/coins/markets"
-        cat_params = {
-            "vs_currency": "usd",
-            "category": "sui-ecosystem",
-            "order": "price_change_percentage_24h_desc",
-            "per_page": 20,
-            "page": 1,
-        }
-        r2 = requests.get(cat_url, params=cat_params, headers=headers, timeout=15)
-        if r2.status_code == 200:
-            tokens = r2.json()
-            for token in tokens:
+        r = requests.get(
+            "https://api.binance.com/api/v3/ticker/24hr",
+            params={"symbol": "SUIUSDT"},
+            timeout=10
+        )
+        r.raise_for_status()
+        data = r.json()
+        result["sui_price"] = float(data["lastPrice"])
+        result["sui_price_change_24h"] = float(data["priceChangePercent"])
+        result["dex_volume"] = float(data["quoteVolume"])  # Volume in USDT
+        log.info(f"Binance: SUI=${result['sui_price']} ({result['sui_price_change_24h']:+.2f}%)")
+    except Exception as e:
+        log.error(f"Binance price fetch failed: {e}")
+    return result
+
+
+def fetch_coingecko_leader() -> dict:
+    """
+    Fetch top Sui ecosystem token from CoinGecko.
+    Separate from price fetch to isolate rate limit risk.
+    """
+    result = {"best_token_symbol": None, "best_token_change": None}
+    headers = {"accept": "application/json"}
+    try:
+        time.sleep(2)
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={
+                "vs_currency": "usd",
+                "category": "sui-ecosystem",
+                "order": "price_change_percentage_24h_desc",
+                "per_page": 20,
+                "page": 1,
+            },
+            headers=headers,
+            timeout=15
+        )
+        if r.status_code == 429:
+            log.warning("CoinGecko leader: rate limited, skipping")
+            return result
+        if r.status_code == 200:
+            for token in r.json():
                 symbol = token.get("symbol", "").upper()
                 change = token.get("price_change_percentage_24h")
                 if symbol not in STABLECOINS and symbol != "SUI" and change is not None:
@@ -192,12 +190,51 @@ def fetch_coingecko() -> dict:
                     result["best_token_change"] = change
                     log.info(f"Leader: {symbol} {change:+.2f}%")
                     break
-        else:
-            log.warning(f"CoinGecko markets: {r2.status_code}")
     except Exception as e:
         log.error(f"CoinGecko leader fetch failed: {e}")
-
     return result
+
+
+def fetch_coingecko() -> dict:
+    """
+    Fallback price fetch from CoinGecko if Binance fails.
+    Also fetches leader token.
+    """
+    log.info("Fetching price data...")
+
+    # Primary: Binance (no rate limits)
+    price_data = fetch_price_binance()
+
+    # Fallback to CoinGecko if Binance fails
+    if price_data.get("sui_price") is None:
+        log.warning("Binance failed — falling back to CoinGecko")
+        headers = {"accept": "application/json"}
+        for attempt in range(3):
+            try:
+                r = requests.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": "sui", "vs_currencies": "usd",
+                            "include_24hr_change": "true", "include_24hr_vol": "true"},
+                    headers=headers, timeout=15
+                )
+                if r.status_code == 429:
+                    time.sleep(60 * (attempt + 1))
+                    continue
+                r.raise_for_status()
+                data = r.json().get("sui", {})
+                price_data["sui_price"] = data.get("usd")
+                price_data["sui_price_change_24h"] = data.get("usd_24h_change")
+                price_data["dex_volume"] = data.get("usd_24h_vol")
+                log.info(f"CoinGecko fallback: SUI=${price_data['sui_price']}")
+                break
+            except Exception as e:
+                log.error(f"CoinGecko fallback attempt {attempt+1} failed: {e}")
+                time.sleep(10)
+
+    # Leader token (CoinGecko only source for this)
+    leader_data = fetch_coingecko_leader()
+
+    return {**price_data, **leader_data}
 
 
 def fetch_defillama() -> dict:
@@ -524,7 +561,7 @@ def fmt_change(value):
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "07:00 UTC MORNING" if now.hour < 14 else "21:00 UTC EVENING"
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "21:00 UTC · EVENING"
     sep = "─" * 24
 
     leader_str = "—"
@@ -567,7 +604,7 @@ def format_free_brief(data: dict) -> str:
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "07:00 UTC MORNING" if now.hour < 14 else "21:00 UTC EVENING"
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "21:00 UTC · EVENING"
     sep = "─" * 26
 
     # Active addresses with change
