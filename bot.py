@@ -675,8 +675,7 @@ def post_to_telegram(channel_id: str, message: str) -> bool:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": channel_id,
-        "text": f"<pre>{message}</pre>",
-        "parse_mode": "HTML",
+        "text": message,
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
