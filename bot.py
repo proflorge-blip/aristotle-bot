@@ -547,9 +547,9 @@ def fmt_addr(value):
     if value is None:
         return "—"
     if value >= 1_000_000:
-        return f"{value/1_000_000:.1f}M"
+        return f"{round(value/1_000_000)}M"
     if value >= 1_000:
-        return f"{value/1_000:.1f}K"
+        return f"{round(value/1_000)}K"
     return str(value)
 
 def fmt_change(value):
@@ -590,7 +590,7 @@ def format_free_brief(data: dict) -> str:
         "ARISTOTLE · SUI UPDATE",
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
-        f"PRICE      {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
+        f"SUI        {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
         f"DEX VOL    {dex_str}",
     ]
@@ -653,7 +653,7 @@ def format_paid_brief(data: dict) -> str:
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         "",
-        f"PRICE          {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
+        f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"ACTIVE ADDR    {addr_str}",
@@ -675,7 +675,8 @@ def post_to_telegram(channel_id: str, message: str) -> bool:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": channel_id,
-        "text": message,
+        "text": f"<pre>{message}</pre>",
+        "parse_mode": "HTML",
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
