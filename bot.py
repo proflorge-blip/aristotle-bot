@@ -666,6 +666,16 @@ def format_paid_brief(data: dict) -> str:
     else:
         logos_str += "  —"
 
+    # DEX VOL with change vs previous snapshot
+    prev_dex = get_previous_value("dex_volume")
+    curr_dex = data.get("dex_volume")
+    dex_str = fmt_large(curr_dex)
+    if prev_dex and curr_dex and prev_dex > 0:
+        dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
+        dex_str += f"   {fmt_pct(dex_change)}"
+    else:
+        dex_str += "   —"
+
     lines = [
         "ARISTOTLE · SUI LOGOS",
         f"{now.strftime('%d %b %Y')} · {session}",
@@ -673,6 +683,7 @@ def format_paid_brief(data: dict) -> str:
         "",
         f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
+        f"DEX VOL        {dex_str}",
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"ACTIVE ADDR    {addr_str}",
         f"DEEPBOOK       {db_str}",
