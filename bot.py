@@ -686,6 +686,76 @@ def format_paid_brief(data: dict) -> str:
 
 
 # ─────────────────────────────────────────
+# IMAGE GENERATION
+# ─────────────────────────────────────────
+
+def get_mono_font(size: int):
+    """Load monospace font. Tries system fonts, then downloads IBM Plex Mono."""
+    from PIL import ImageFont
+    font_candidates = [
+        "IBMPlexMono-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeMono.ttf",
+        "/Library/Fonts/Courier New.ttf",
+    ]
+    for path in font_candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    font_cache = "/tmp/IBMPlexMono-Regular.ttf"
+    if not os.path.exists(font_cache):
+        try:
+            r = requests.get(
+                "https://github.com/IBM/plex/raw/master/packages/plex-mono/fonts/complete/ttf/IBMPlexMono-Regular.ttf",
+                timeout=15
+            )
+            if r.status_code == 200:
+                with open(font_cache, 'wb') as f:
+                    f.write(r.content)
+                log.info("Downloaded IBM Plex Mono font")
+        except Exception as e:
+            log.warning(f"Font download failed: {e}")
+    if os.path.exists(font_cache):
+        try:
+            return ImageFont.truetype(font_cache, size)
+        except Exception:
+            pass
+    log.warning("Using PIL default font")
+    return ImageFont.load_default()
+
+
+def generate_report_image(message: str):
+    """Render the free brief as a PNG matching Telegram card style."""
+    try:
+        from PIL import Image, ImageDraw
+        import io
+        font_size = 30
+        font = get_mono_font(font_size)
+        lines = message.split('\n')
+        pad_x, pad_y = 70, 55
+        line_height = int(font_size * 1.65)
+        width = 1200
+        height = pad_y * 2 + len(lines) * line_height
+        bg = (207, 226, 243)   # #cfe2f3 — Telegram-style pale blue
+        fg = (26, 26, 26)      # #1a1a1a
+        img = Image.new('RGB', (width, height), bg)
+        draw = ImageDraw.Draw(img)
+        y = pad_y
+        for line in lines:
+            draw.text((pad_x, y), line, font=font, fill=fg)
+            y += line_height
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return buf.read()
+    except Exception as e:
+        log.error(f"Image generation failed: {e}")
+        return None
+
+
+# ─────────────────────────────────────────
 # TELEGRAM
 # ─────────────────────────────────────────
 
@@ -710,93 +780,86 @@ def post_to_telegram(channel_id: str, message: str) -> bool:
 # X (TWITTER) POSTING
 # ─────────────────────────────────────────
 
-def format_x_brief(data: dict) -> str:
-    """Format a compact brief for X — shorter, no monospace columns."""
-    now = datetime.now(timezone.utc)
-    price = fmt_price(data.get("sui_price"))
-    price_chg = fmt_pct(data.get("sui_price_change_24h"))
-    tvl = fmt_large(data.get("tvl"))
-    tvl_chg = fmt_pct(data.get("tvl_change_24h"))
-    dex = fmt_large(data.get("dex_volume"))
-
-    leader_str = ""
-    if data.get("best_token_symbol") and data.get("best_token_change") is not None:
-        leader_str = f"\nLEADER  {data['best_token_symbol']} {fmt_pct(data['best_token_change'])}"
-
-    return (
-        f"ARISTOTLE · SUI UPDATE\n"
-        f"{now.strftime('%d %b %Y')} · {now.strftime('%H:%M')} UTC\n"
-        f"\n"
-        f"PRICE    {price} {price_chg}\n"
-        f"CAPITAL  {tvl} {tvl_chg}\n"
-        f"DEX VOL  {dex}"
-        f"{leader_str}\n"
-        f"\n@aristotlesuiupdate"
+def _x_oauth_header(method: str, url: str) -> str:
+    """Build OAuth 1.0a Authorization header for X API."""
+    import hmac, hashlib, base64, urllib.parse, time as time_mod, uuid
+    oauth_params = {
+        "oauth_consumer_key":     X_API_KEY,
+        "oauth_nonce":            uuid.uuid4().hex,
+        "oauth_signature_method": "HMAC-SHA1",
+        "oauth_timestamp":        str(int(time_mod.time())),
+        "oauth_token":            X_ACCESS_TOKEN,
+        "oauth_version":          "1.0",
+    }
+    params_string = "&".join(
+        f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
+        for k, v in sorted(oauth_params.items())
+    )
+    base_string = "&".join([
+        method,
+        urllib.parse.quote(url, safe=""),
+        urllib.parse.quote(params_string, safe=""),
+    ])
+    signing_key = f"{urllib.parse.quote(X_API_SECRET, safe='')}&{urllib.parse.quote(X_ACCESS_TOKEN_SECRET, safe='')}"
+    signature = base64.b64encode(
+        __import__('hmac').new(signing_key.encode(), base_string.encode(), __import__('hashlib').sha1).digest()
+    ).decode()
+    oauth_params["oauth_signature"] = signature
+    return "OAuth " + ", ".join(
+        f'{urllib.parse.quote(k, safe="")}="{urllib.parse.quote(v, safe="")}"'
+        for k, v in sorted(oauth_params.items())
     )
 
 
-def post_to_x(message: str) -> bool:
-    """Post to X using OAuth 1.0a."""
+def upload_media_to_x(image_bytes: bytes):
+    """Upload image to X v1.1 media API, return media_id_string."""
+    try:
+        import io
+        url = "https://upload.twitter.com/1/media/upload.json"
+        auth = _x_oauth_header("POST", url)
+        r = requests.post(
+            url,
+            headers={"Authorization": auth},
+            files={"media": ("report.png", io.BytesIO(image_bytes), "image/png")},
+            timeout=30,
+        )
+        r.raise_for_status()
+        media_id = r.json().get("media_id_string")
+        log.info(f"X media uploaded: {media_id}")
+        return media_id
+    except Exception as e:
+        log.error(f"X media upload failed: {e}")
+        return None
+
+
+def post_to_x(free_brief: str) -> bool:
+    """Generate report image and post to X."""
     if not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET]):
         log.warning("X credentials not set — skipping X post")
         return False
     try:
-        import hmac
-        import hashlib
-        import base64
-        import urllib.parse
-        import time as time_mod
-        import uuid
-
+        image_bytes = generate_report_image(free_brief)
+        if not image_bytes:
+            log.error("Image generation failed — skipping X post")
+            return False
+        media_id = upload_media_to_x(image_bytes)
+        if not media_id:
+            log.error("Media upload failed — skipping X post")
+            return False
+        now = datetime.now(timezone.utc)
+        session = "morning" if now.hour < 14 else "evening"
+        caption = f"@Sui {session} data — {now.strftime('%b')} {now.day}"
         url = "https://api.twitter.com/2/tweets"
-        method = "POST"
-
-        # OAuth 1.0a signature
-        oauth_timestamp = str(int(time_mod.time()))
-        oauth_nonce = uuid.uuid4().hex
-
-        oauth_params = {
-            "oauth_consumer_key": X_API_KEY,
-            "oauth_nonce": oauth_nonce,
-            "oauth_signature_method": "HMAC-SHA1",
-            "oauth_timestamp": oauth_timestamp,
-            "oauth_token": X_ACCESS_TOKEN,
-            "oauth_version": "1.0",
-        }
-
-        # Build signature base string
-        params_string = "&".join(
-            f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
-            for k, v in sorted(oauth_params.items())
-        )
-        base_string = "&".join([
-            method,
-            urllib.parse.quote(url, safe=""),
-            urllib.parse.quote(params_string, safe=""),
-        ])
-
-        # Sign
-        signing_key = f"{urllib.parse.quote(X_API_SECRET, safe='')}&{urllib.parse.quote(X_ACCESS_TOKEN_SECRET, safe='')}"
-        signature = base64.b64encode(
-            hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
-        ).decode()
-
-        oauth_params["oauth_signature"] = signature
-        auth_header = "OAuth " + ", ".join(
-            f'{urllib.parse.quote(k, safe="")}="{urllib.parse.quote(v, safe="")}"'
-            for k, v in sorted(oauth_params.items())
-        )
-
+        auth = _x_oauth_header("POST", url)
         r = requests.post(
             url,
-            headers={"Authorization": auth_header, "Content-Type": "application/json"},
-            json={"text": message},
+            headers={"Authorization": auth, "Content-Type": "application/json"},
+            json={"text": caption, "media": {"media_ids": [media_id]}},
             timeout=10,
         )
         r.raise_for_status()
-        log.info("Posted to X")
+        log.info("Posted image to X")
         return True
-
     except Exception as e:
         log.error(f"X post failed: {e}")
         return False
@@ -848,9 +911,8 @@ def run():
     post_to_telegram(FREE_CHANNEL_ID, free_brief)
     post_to_telegram(PAID_CHANNEL_ID, paid_brief)
 
-    # Post free brief to X
-    x_brief = format_x_brief(data)
-    post_to_x(x_brief)
+    # Post free brief to X as image
+    post_to_x(free_brief)
 
     save_snapshot(data)
     log.info("═══ PIPELINE COMPLETE ═══")
