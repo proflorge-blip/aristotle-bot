@@ -139,7 +139,7 @@ def fetch_price_binance() -> dict:
     No API key required. No rate limits for basic ticker data.
     Primary price source.
     """
-    result = {"sui_price": None, "sui_price_change_24h": None, "dex_volume": None}
+    result = {"sui_price": None, "sui_price_change_24h": None}
     try:
         r = requests.get(
             "https://api.binance.com/api/v3/ticker/24hr",
@@ -150,7 +150,6 @@ def fetch_price_binance() -> dict:
         data = r.json()
         result["sui_price"] = float(data["lastPrice"])
         result["sui_price_change_24h"] = float(data["priceChangePercent"])
-        result["dex_volume"] = float(data["quoteVolume"])  # Volume in USDT
         log.info(f"Binance: SUI=${result['sui_price']} ({result['sui_price_change_24h']:+.2f}%)")
     except Exception as e:
         log.error(f"Binance price fetch failed: {e}")
@@ -224,7 +223,6 @@ def fetch_coingecko() -> dict:
                 data = r.json().get("sui", {})
                 price_data["sui_price"] = data.get("usd")
                 price_data["sui_price_change_24h"] = data.get("usd_24h_change")
-                price_data["dex_volume"] = data.get("usd_24h_vol")
                 log.info(f"CoinGecko fallback: SUI=${price_data['sui_price']}")
                 break
             except Exception as e:
@@ -238,8 +236,8 @@ def fetch_coingecko() -> dict:
 
 
 def fetch_defillama() -> dict:
-    log.info("Fetching DeFiLlama TVL...")
-    result = {"tvl": None, "tvl_change_24h": None}
+    log.info("Fetching DeFiLlama TVL and DEX volume...")
+    result = {"tvl": None, "tvl_change_24h": None, "dex_volume": None}
     try:
         # Primary: historical TVL endpoint gives us current + previous to calc change
         r = requests.get("https://api.llama.fi/v2/historicalChainTvl/Sui", timeout=10)
@@ -252,19 +250,39 @@ def fetch_defillama() -> dict:
                 if current and previous and previous > 0:
                     result["tvl_change_24h"] = ((current - previous) / previous) * 100
                 log.info(f"DeFiLlama: TVL=${current:,.0f} change={result['tvl_change_24h']}")
-                return result
 
         # Fallback: chains endpoint
-        r2 = requests.get("https://api.llama.fi/v2/chains", timeout=10)
-        r2.raise_for_status()
-        for chain in r2.json():
-            if chain.get("name", "").lower() == "sui":
-                result["tvl"] = chain.get("tvl")
-                result["tvl_change_24h"] = chain.get("change_1d")
-                break
-        log.info(f"DeFiLlama: TVL=${result['tvl']:,.0f}" if result["tvl"] else "DeFiLlama: not found")
+        if result["tvl"] is None:
+            r2 = requests.get("https://api.llama.fi/v2/chains", timeout=10)
+            r2.raise_for_status()
+            for chain in r2.json():
+                if chain.get("name", "").lower() == "sui":
+                    result["tvl"] = chain.get("tvl")
+                    result["tvl_change_24h"] = chain.get("change_1d")
+                    break
+            log.info(f"DeFiLlama: TVL=${result['tvl']:,.0f}" if result["tvl"] else "DeFiLlama: not found")
     except Exception as e:
-        log.error(f"DeFiLlama fetch failed: {e}")
+        log.error(f"DeFiLlama TVL fetch failed: {e}")
+
+    # DEX volume: DeFiLlama Sui DEX aggregator (true on-chain DEX vol)
+    try:
+        r3 = requests.get(
+            "https://api.llama.fi/overview/dexs/sui?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume",
+            timeout=10
+        )
+        if r3.status_code == 200:
+            data = r3.json()
+            vol = data.get("total24h")
+            if vol:
+                result["dex_volume"] = float(vol)
+                log.info(f"DeFiLlama DEX vol (Sui): ${vol:,.0f}")
+            else:
+                log.warning("DeFiLlama DEX vol: total24h field not found")
+        else:
+            log.warning(f"DeFiLlama DEX vol: {r3.status_code}")
+    except Exception as e:
+        log.error(f"DeFiLlama DEX vol fetch failed: {e}")
+
     return result
 
 
