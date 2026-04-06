@@ -201,12 +201,12 @@ def fetch_coingecko() -> dict:
     """
     log.info("Fetching price data...")
 
-    # Primary: Binance (no rate limits)
-    price_data = fetch_price_binance()
+    # Primary: CoinGecko (Binance geo-blocked on Railway)
+    price_data = {"sui_price": None, "sui_price_change_24h": None}
 
-    # Fallback to CoinGecko if Binance fails
+    # Fallback to Binance only if CoinGecko fails
     if price_data.get("sui_price") is None:
-        log.warning("Binance failed — falling back to CoinGecko")
+        log.warning("Trying Binance as fallback...")
         headers = {"accept": "application/json"}
         for attempt in range(3):
             try:
@@ -283,6 +283,33 @@ def fetch_defillama() -> dict:
     except Exception as e:
         log.error(f"DeFiLlama DEX vol fetch failed: {e}")
 
+    return result
+
+
+def fetch_stablecoin_mcap() -> dict:
+    """
+    Fetch Sui stablecoin market cap from DeFiLlama.
+    Returns current mcap and 24h change.
+    """
+    log.info("Fetching Sui stablecoin market cap...")
+    result = {"stablecoin_mcap": None}
+    try:
+        r = requests.get("https://stablecoins.llama.fi/stablecoincharts/Sui", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if len(data) >= 2:
+                current = data[-1].get("totalCirculating", {})
+                prev = data[-2].get("totalCirculating", {})
+                curr_val = sum(v for v in current.values() if isinstance(v, (int, float)))
+                prev_val = sum(v for v in prev.values() if isinstance(v, (int, float)))
+                result["stablecoin_mcap"] = curr_val
+                if prev_val and prev_val > 0:
+                    result["stablecoin_mcap_change"] = ((curr_val - prev_val) / prev_val) * 100
+                log.info(f"Stablecoin mcap: ${curr_val:,.0f}")
+        else:
+            log.warning(f"Stablecoin mcap: {r.status_code}")
+    except Exception as e:
+        log.error(f"Stablecoin mcap fetch failed: {e}")
     return result
 
 
@@ -625,16 +652,6 @@ def format_paid_brief(data: dict) -> str:
     session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 26
 
-    # Active addresses with change
-    prev_addr = get_previous_value("active_addresses")
-    curr_addr = data.get("active_addresses")
-    addr_str = fmt_addr(curr_addr)
-    if prev_addr and curr_addr:
-        addr_change = ((curr_addr - prev_addr) / prev_addr) * 100
-        addr_str += f"    {fmt_pct(addr_change)}"
-    else:
-        addr_str += "    —"
-
     # DeepBook with change
     prev_db = get_previous_value("deepbook_liquidity")
     curr_db = data.get("deepbook_liquidity")
@@ -676,6 +693,12 @@ def format_paid_brief(data: dict) -> str:
     else:
         dex_str += "   —"
 
+    # Stablecoin mcap with change
+    curr_sc = data.get("stablecoin_mcap")
+    sc_change = data.get("stablecoin_mcap_change")
+    sc_str = fmt_large(curr_sc)
+    sc_str += f"   {fmt_pct(sc_change)}" if sc_change is not None else "   —"
+
     lines = [
         "ARISTOTLE · SUI LOGOS",
         f"{now.strftime('%d %b %Y')} · {session}",
@@ -684,8 +707,8 @@ def format_paid_brief(data: dict) -> str:
         f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
         f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
         f"DEX VOL        {dex_str}",
+        f"STBL MCAP      {sc_str}",
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
-        f"ACTIVE ADDR    {addr_str}",
         f"DEEPBOOK       {db_str}",
         f"MEAN REV       {mr_str}σ",
         "",
@@ -734,14 +757,11 @@ def run():
 
     cg      = fetch_coingecko()
     dl      = fetch_defillama()
-    rpc     = fetch_active_addresses_blockberry()
-    if rpc.get("active_addresses") is None:
-        log.warning("Blockberry unavailable — falling back to RPC proxy")
-        rpc = fetch_sui_rpc()
+    sc      = fetch_stablecoin_mcap()
     db      = fetch_deepbook()
     staking = fetch_staking()
 
-    data = {**cg, **dl, **rpc, **db, **staking}
+    data = {**cg, **dl, **sc, **db, **staking}
 
     # Calculate 7-day EMA for DeepBook
     data["deepbook_ema"] = calculate_deepbook_ema(data.get("deepbook_liquidity") or 0)
