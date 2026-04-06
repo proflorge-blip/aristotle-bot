@@ -723,7 +723,10 @@ def run():
 
     cg      = fetch_coingecko()
     dl      = fetch_defillama()
-    rpc     = fetch_sui_rpc()
+    rpc     = fetch_active_addresses_blockberry()
+    if rpc.get("active_addresses") is None:
+        log.warning("Blockberry unavailable — falling back to RPC proxy")
+        rpc = fetch_sui_rpc()
     db      = fetch_deepbook()
     staking = fetch_staking()
 
