@@ -579,7 +579,7 @@ def fmt_change(value):
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "21h UTC · EVENING"
+    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 24
 
     leader_str = "—"
@@ -622,7 +622,7 @@ def format_free_brief(data: dict) -> str:
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "21h UTC · EVENING"
+    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 26
 
     # Active addresses with change
