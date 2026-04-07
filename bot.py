@@ -519,12 +519,14 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "tvl":              0.25,
-    "staking_ratio":    0.20,
-    "mean_reversion":   0.18,
-    "sui_price":        0.15,
-    "stablecoin_mcap":  0.12,
-    "tx_count":         0.10,
+    "tvl":              0.27,  # 25% + share of missing fees
+    "staking_ratio":    0.23,  # 22% + share
+    "stablecoin_mcap":  0.17,  # 15% + share
+    "mean_reversion":   0.13,  # 12% + share
+    "sui_price":        0.08,
+    "tx_count":         0.06,
+    "deepbook":         0.06,
+    # "network_fees":   0.08,  # TODO: add 7d avg network fees (V1.5)
 }
 
 RANGES = {
@@ -566,6 +568,7 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> float:
         "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
         "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
         "tx_count":         normalise(data.get("tx_count_total"), RANGES["tx_count"]["min"], RANGES["tx_count"]["max"]),
+        "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
     }
     raw = max(1, min(100, sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)))
     if previous_index is not None:
