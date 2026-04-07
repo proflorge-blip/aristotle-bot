@@ -65,6 +65,7 @@ def init_db():
             deepbook_ema REAL,
             deepbook_change REAL,
             staking_ratio REAL,
+            tx_count_total INTEGER,
             mean_reversion REAL,
             mean_reversion_prev REAL,
             logos_index REAL,
@@ -98,6 +99,7 @@ def save_snapshot(data: dict):
         data.get("deepbook_ema"),
         data.get("deepbook_change"),
         data.get("staking_ratio"),
+        data.get("tx_count_total"),
         data.get("mean_reversion"),
         data.get("mean_reversion_prev"),
         data.get("logos_index"),
@@ -313,9 +315,13 @@ def fetch_stablecoin_mcap() -> dict:
     return result
 
 
-def fetch_sui_rpc() -> dict:
-    log.info("Fetching Sui RPC data...")
-    result = {"active_addresses": None}
+def fetch_tx_count() -> dict:
+    """
+    Fetch cumulative network transaction count from Sui RPC.
+    Compares with previous snapshot to derive 12h tx count.
+    """
+    log.info("Fetching Sui transaction count...")
+    result = {"tx_count_total": None}
     try:
         url = "https://fullnode.mainnet.sui.io:443"
         r = requests.post(url, json={
@@ -331,10 +337,11 @@ def fetch_sui_rpc() -> dict:
         }, timeout=10)
         r2.raise_for_status()
         total_tx = int(r2.json().get("result", {}).get("networkTotalTransactions", 0))
-        result["active_addresses"] = total_tx // 50 if total_tx > 0 else None
-        log.info(f"Sui RPC: ~{result['active_addresses']:,} active addresses (proxy)" if result["active_addresses"] else "Sui RPC: unavailable")
+        if total_tx > 0:
+            result["tx_count_total"] = total_tx
+            log.info(f"Sui RPC: {total_tx:,} total transactions")
     except Exception as e:
-        log.error(f"Sui RPC fetch failed: {e}")
+        log.error(f"Sui tx count fetch failed: {e}")
     return result
 
 
@@ -512,20 +519,21 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "tvl":              0.24,
-    "active_addresses": 0.20,
-    "staking_ratio":    0.18,
-    "deepbook":         0.15,
-    "mean_reversion":   0.13,
-    "sui_price":        0.10,
+    "tvl":              0.25,
+    "staking_ratio":    0.20,
+    "mean_reversion":   0.18,
+    "sui_price":        0.15,
+    "stablecoin_mcap":  0.12,
+    "tx_count":         0.10,
 }
 
 RANGES = {
-    "active_addresses": {"min": 50_000,       "max": 500_000},
     "tvl":              {"min": 200_000_000,   "max": 2_000_000_000},
     "deepbook":         {"min": 0,             "max": 10_000_000},
     "sui_price":        {"min": 0.5,           "max": 10.0},
-    "staking_ratio":    {"min": 0.40,          "max": 0.80},  # % of SUI staked (40-80%)
+    "staking_ratio":    {"min": 0.40,          "max": 0.80},
+    "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_000_000_000},
+    "tx_count":         {"min": 500_000,       "max": 5_000_000},
 }
 
 DAMPENING_CAP = 10.0
@@ -553,11 +561,11 @@ def zscore_to_score(z: float) -> float:
 def calculate_logos_index(data: dict, previous_index: float = None) -> float:
     scores = {
         "tvl":              normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
-        "active_addresses": normalise(data.get("active_addresses"), RANGES["active_addresses"]["min"], RANGES["active_addresses"]["max"]),
         "staking_ratio":    normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
-        "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
         "mean_reversion":   zscore_to_score(data.get("mean_reversion", 0.0) or 0.0),
         "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
+        "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
+        "tx_count":         normalise(data.get("tx_count_total"), RANGES["tx_count"]["min"], RANGES["tx_count"]["max"]),
     }
     raw = max(1, min(100, sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)))
     if previous_index is not None:
@@ -699,6 +707,19 @@ def format_paid_brief(data: dict) -> str:
     sc_str = fmt_large(curr_sc)
     sc_str += f"   {fmt_pct(sc_change)}" if sc_change is not None else "   —"
 
+    # TX count with 12h change vs previous snapshot
+    prev_tx = get_previous_value("tx_count_total")
+    curr_tx = data.get("tx_count_total")
+    if curr_tx:
+        tx_str = fmt_addr(curr_tx)
+        if prev_tx and prev_tx > 0:
+            tx_delta = curr_tx - prev_tx
+            tx_str += f"   +{fmt_addr(tx_delta)}"
+        else:
+            tx_str += "   —"
+    else:
+        tx_str = "—"
+
     lines = [
         "ARISTOTLE · SUI LOGOS",
         f"{now.strftime('%d %b %Y')} · {session}",
@@ -708,6 +729,7 @@ def format_paid_brief(data: dict) -> str:
         f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
         f"DEX VOL        {dex_str}",
         f"STBL MCAP      {sc_str}",
+        f"TXS 12H        {tx_str}",
         f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"DEEPBOOK       {db_str}",
         f"MEAN REV       {mr_str}σ",
@@ -760,8 +782,9 @@ def run():
     sc      = fetch_stablecoin_mcap()
     db      = fetch_deepbook()
     staking = fetch_staking()
+    tx      = fetch_tx_count()
 
-    data = {**cg, **dl, **sc, **db, **staking}
+    data = {**cg, **dl, **sc, **db, **staking, **tx}
 
     # If DeepBook returned 0 or None, use last known good value from DB
     if not data.get("deepbook_liquidity"):
