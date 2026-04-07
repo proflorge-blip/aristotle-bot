@@ -763,6 +763,13 @@ def run():
 
     data = {**cg, **dl, **sc, **db, **staking}
 
+    # If DeepBook returned 0 or None, use last known good value from DB
+    if not data.get("deepbook_liquidity"):
+        last_db = get_previous_value("deepbook_liquidity")
+        if last_db and last_db > 0:
+            data["deepbook_liquidity"] = last_db
+            log.warning(f"DeepBook fetch returned 0 — using last known value: ${last_db:,.0f}")
+
     # Calculate 7-day EMA for DeepBook
     data["deepbook_ema"] = calculate_deepbook_ema(data.get("deepbook_liquidity") or 0)
     log.info(f"DeepBook EMA (7d): {data['deepbook_ema']:,.0f}")
