@@ -84,9 +84,9 @@ def save_snapshot(data: dict):
         INSERT INTO snapshots_v3 (
             timestamp, sui_price, sui_price_change_24h, dex_volume,
             tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
-            deepbook_ema, deepbook_change, staking_ratio, mean_reversion,
-            mean_reversion_prev, logos_index, best_token_symbol, best_token_change
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            deepbook_ema, deepbook_change, staking_ratio, tx_count_total,
+            mean_reversion, mean_reversion_prev, logos_index, best_token_symbol, best_token_change
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get("timestamp"),
         data.get("sui_price"),
