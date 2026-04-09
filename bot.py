@@ -109,6 +109,36 @@ def save_snapshot(data: dict):
     conn.commit()
     conn.close()
 
+def seed_price_history():
+    """Seed DB with 20 days of historical SUI prices from CoinGecko if not enough history."""
+    try:
+        existing = get_price_history(days=20)
+        if len(existing) >= 20:
+            log.info("Price history already seeded — skipping.")
+            return
+        log.info("Seeding price history from CoinGecko (20d)...")
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/coins/sui/market_chart",
+            params={"vs_currency": "usd", "days": 20, "interval": "daily"},
+            timeout=15
+        )
+        r.raise_for_status()
+        prices = r.json().get("prices", [])
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        for ts_ms, price in prices[:-1]:  # exclude today — bot will insert current
+            ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
+            c.execute(
+                "INSERT INTO snapshots_v3 (timestamp, sui_price) VALUES (?, ?)",
+                (ts, round(price, 6))
+            )
+        conn.commit()
+        conn.close()
+        log.info(f"Seeded {len(prices)-1} historical price points.")
+    except Exception as e:
+        log.error(f"Price history seed failed: {e}")
+
+
 def get_price_history(days: int = 20) -> list:
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -779,6 +809,7 @@ def post_to_telegram(channel_id: str, message: str) -> bool:
 def run():
     log.info("═══ ARISTOTLE PIPELINE START ═══")
     init_db()
+    seed_price_history()
 
     cg      = fetch_coingecko()
     dl      = fetch_defillama()
