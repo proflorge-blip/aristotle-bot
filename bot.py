@@ -644,6 +644,18 @@ def fmt_change(value):
         return ""
     return f"{'+' if value >= 0 else ''}{value:.2f}"
 
+def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: float = 5.0) -> str:
+    if change_pct >= major_threshold:
+        return "▲"
+    elif change_pct >= minor_threshold:
+        return "△"
+    elif change_pct <= -major_threshold:
+        return "▼"
+    elif change_pct <= -minor_threshold:
+        return "▽"
+    else:
+        return "—"
+
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
@@ -676,8 +688,8 @@ def format_free_brief(data: dict) -> str:
         "ARISTOTLE · SUI UPDATE",
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
-        f"SUI        {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
-        f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
+        f"SUI        {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h') or 0)}",
+        f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h') or 0)}",
         f"DEX VOL    {dex_str}",
     ]
     if show_logos:
@@ -699,7 +711,7 @@ def format_paid_brief(data: dict) -> str:
     db_str = fmt_large(curr_db)
     if prev_db and curr_db and prev_db > 0:
         db_change = ((curr_db - prev_db) / prev_db) * 100
-        db_str += f"    {fmt_pct(db_change)}"
+        db_str += f"    {fmt_pct(db_change)} {get_arrow(db_change)}"
     else:
         db_str += "    —"
 
@@ -709,7 +721,7 @@ def format_paid_brief(data: dict) -> str:
     mr_str = f"{curr_mr:+.2f}" if curr_mr is not None else "—"
     if prev_mr is not None and curr_mr is not None:
         mr_change = curr_mr - prev_mr
-        mr_str += f"     {fmt_change(mr_change)}"
+        mr_str += f"     {fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
     else:
         mr_str += "     —"
 
@@ -719,7 +731,7 @@ def format_paid_brief(data: dict) -> str:
     logos_str = f"{curr_logos:.1f}/100" if curr_logos is not None else "—"
     if prev_logos is not None and curr_logos is not None:
         delta = curr_logos - prev_logos
-        arrow = "▲" if delta >= 0 else "▼"
+        arrow = get_arrow(delta)
         logos_str += f"  {arrow}"
     else:
         logos_str += "  —"
@@ -730,7 +742,7 @@ def format_paid_brief(data: dict) -> str:
     dex_str = fmt_large(curr_dex)
     if prev_dex and curr_dex and prev_dex > 0:
         dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
-        dex_str += f"   {fmt_pct(dex_change)}"
+        dex_str += f"   {fmt_pct(dex_change)} {get_arrow(dex_change)}"
     else:
         dex_str += "   —"
 
@@ -738,7 +750,7 @@ def format_paid_brief(data: dict) -> str:
     curr_sc = data.get("stablecoin_mcap")
     sc_change = data.get("stablecoin_mcap_change")
     sc_str = fmt_large(curr_sc)
-    sc_str += f"   {fmt_pct(sc_change)}" if sc_change is not None else "   —"
+    sc_str += f"   {fmt_pct(sc_change)} {get_arrow(sc_change)}" if sc_change is not None else "   —"
 
     # TX count with 12h change vs previous snapshot
     prev_tx = get_previous_value("tx_count_total")
@@ -758,8 +770,8 @@ def format_paid_brief(data: dict) -> str:
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         "",
-        f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))}",
-        f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))}",
+        f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h') or 0)}",
+        f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h') or 0)}",
         f"DEX VOL        {dex_str}",
         f"STBL MCAP      {sc_str}",
         f"TXS 12H        {tx_str}",
