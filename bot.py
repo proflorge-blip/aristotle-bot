@@ -549,11 +549,11 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "tvl":              0.27,  # 25% + share of missing fees
-    "staking_ratio":    0.23,  # 22% + share
-    "stablecoin_mcap":  0.17,  # 15% + share
-    "mean_reversion":   0.13,  # 12% + share
-    "sui_price":        0.08,
+    "tvl":              0.25,  # primary ecosystem health signal
+    "staking_ratio":    0.23,  # long-run commitment signal
+    "stablecoin_mcap":  0.17,  # real economic demand on-chain
+    "sui_price":        0.15,  # price/sentiment — tightened range for current levels
+    "mean_reversion":   0.08,  # contrarian flag — dampened, not an override
     "tx_count":         0.06,
     "deepbook":         0.06,
     # "network_fees":   0.08,  # TODO: add 7d avg network fees (V1.5)
@@ -562,7 +562,7 @@ WEIGHTS = {
 RANGES = {
     "tvl":              {"min": 200_000_000,   "max": 2_000_000_000},
     "deepbook":         {"min": 0,             "max": 10_000_000},
-    "sui_price":        {"min": 0.5,           "max": 10.0},
+    "sui_price":        {"min": 0.5,           "max": 2.5},
     "staking_ratio":    {"min": 0.40,          "max": 0.80},
     "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_000_000_000},
     "tx_count":         {"min": 500_000,       "max": 5_000_000},
@@ -587,7 +587,7 @@ def mean_reversion_zscore(current_price: float, history: list) -> float:
 
 
 def zscore_to_score(z: float) -> float:
-    return max(0, min(100, 50 - (z * 15)))
+    return max(0, min(100, 50 - (z * 10)))
 
 
 def calculate_logos_index(data: dict, previous_index: float = None) -> float:
