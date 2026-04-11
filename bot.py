@@ -721,7 +721,7 @@ def format_paid_brief(data: dict) -> str:
     mr_str = f"{curr_mr:+.2f}σ" if curr_mr is not None else "—"
     if prev_mr is not None and curr_mr is not None:
         mr_change = curr_mr - prev_mr
-        mr_str += f"     {fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
+        mr_str += f"    {fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
     else:
         mr_str += "     —"
 
