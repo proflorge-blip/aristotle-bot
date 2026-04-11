@@ -565,7 +565,7 @@ RANGES = {
     "sui_price":        {"min": 0.5,           "max": 2.5},
     "staking_ratio":    {"min": 0.40,          "max": 0.80},
     "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_000_000_000},
-    "tx_count":         {"min": 500_000,       "max": 5_000_000},
+    "tx_count":         {"min": 0,             "max": 10_000_000},
 }
 
 DAMPENING_CAP = 10.0
@@ -597,7 +597,7 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> float:
         "mean_reversion":   zscore_to_score(data.get("mean_reversion", 0.0) or 0.0),
         "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
         "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
-        "tx_count":         normalise(data.get("tx_count_total"), RANGES["tx_count"]["min"], RANGES["tx_count"]["max"]),
+        "tx_count":         normalise(data.get("tx_12h_delta"), RANGES["tx_count"]["min"], RANGES["tx_count"]["max"]),
         "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
     }
     raw = max(1, min(100, sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)))
@@ -839,6 +839,13 @@ def run():
     else:
         data["mean_reversion"] = 0.0
         log.warning("Not enough price history for mean reversion — using 0.0")
+
+    # 12h TX delta for Logos Index (activity in this window, not all-time cumulative)
+    prev_tx = get_previous_value("tx_count_total")
+    if data.get("tx_count_total") and prev_tx:
+        data["tx_12h_delta"] = data["tx_count_total"] - prev_tx
+    else:
+        data["tx_12h_delta"] = None
 
     # Logos Index
     prev_index = get_previous_value("logos_index")
