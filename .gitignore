@@ -1,0 +1,10 @@
+# Runtime database — generated on first run, not part of source
+aristotle.db
+
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
