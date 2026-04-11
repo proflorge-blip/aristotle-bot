@@ -718,7 +718,7 @@ def format_paid_brief(data: dict) -> str:
     # Mean reversion with change vs previous
     prev_mr = get_previous_value("mean_reversion")
     curr_mr = data.get("mean_reversion")
-    mr_str = f"{curr_mr:+.2f}" if curr_mr is not None else "—"
+    mr_str = f"{curr_mr:+.2f}σ" if curr_mr is not None else "—"
     if prev_mr is not None and curr_mr is not None:
         mr_change = curr_mr - prev_mr
         mr_str += f"     {fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
@@ -746,25 +746,6 @@ def format_paid_brief(data: dict) -> str:
     else:
         dex_str += "   —"
 
-    # Stablecoin mcap with change
-    curr_sc = data.get("stablecoin_mcap")
-    sc_change = data.get("stablecoin_mcap_change")
-    sc_str = fmt_large(curr_sc)
-    sc_str += f"   {fmt_pct(sc_change)} {get_arrow(sc_change)}" if sc_change is not None else "   —"
-
-    # TX count with 12h change vs previous snapshot
-    prev_tx = get_previous_value("tx_count_total")
-    curr_tx = data.get("tx_count_total")
-    if curr_tx:
-        tx_str = fmt_addr(curr_tx)
-        if prev_tx and prev_tx > 0:
-            tx_delta = curr_tx - prev_tx
-            tx_str += f"   +{fmt_addr(tx_delta)}"
-        else:
-            tx_str += "   —"
-    else:
-        tx_str = "—"
-
     lines = [
         "ARISTOTLE · SUI LOGOS",
         f"{now.strftime('%d %b %Y')} · {session}",
@@ -773,11 +754,8 @@ def format_paid_brief(data: dict) -> str:
         f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h') or 0)}",
         f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h') or 0)}",
         f"DEX VOL        {dex_str}",
-        f"STBL MCAP      {sc_str}",
-        f"TXS 12H        {tx_str}",
-        f"STAKING        {str(round(data.get('staking_ratio', 0) * 100, 1)) + '%' if data.get('staking_ratio') else '—'}",
         f"DEEPBOOK       {db_str}",
-        f"MEAN REV       {mr_str}σ",
+        f"MEAN REV       {mr_str}",
         "",
         sep,
         f"LOGOS INDEX    {logos_str}",
