@@ -659,7 +659,7 @@ def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: 
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "21h UTC · EVENING"
+    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 24
 
     leader_str = "—"
@@ -702,7 +702,7 @@ def format_free_brief(data: dict) -> str:
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "21h UTC · EVENING"
+    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 26
 
     # DeepBook with change
