@@ -561,7 +561,7 @@ WEIGHTS = {
 
 RANGES = {
     "tvl":              {"min": 200_000_000,   "max": 2_000_000_000},
-    "deepbook":         {"min": 0,             "max": 10_000_000},
+    "deepbook":         {"min": 0,             "max": 20_000_000},
     "sui_price":        {"min": 0.5,           "max": 2.5},
     "staking_ratio":    {"min": 0.40,          "max": 0.80},
     "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_000_000_000},
@@ -659,7 +659,7 @@ def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: 
 
 def format_free_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
+    session = "7h UTC · MORNING" if now.hour < 14 else "21h UTC · EVENING"
     sep = "─" * 24
 
     leader_str = "—"
@@ -702,7 +702,7 @@ def format_free_brief(data: dict) -> str:
 
 def format_paid_brief(data: dict) -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
+    session = "7h UTC · MORNING" if now.hour < 14 else "21h UTC · EVENING"
     sep = "─" * 26
 
     # DeepBook with change

@@ -1,6 +1,6 @@
 """
 ARISTOTLE: SUI LOGOS
-Scheduler — runs bot.py at 08:00 and 20:00 UTC daily
+Scheduler — runs bot.py at 07:00 and 21:00 UTC daily
 Run this file to keep the bot alive.
 """
 
@@ -26,7 +26,7 @@ def job():
 schedule.every().day.at("07:00").do(job)
 schedule.every().day.at("21:00").do(job)
 
-log.info("Scheduler started. Running at 07:00 and 21:00 UTC.")
+log.info("Scheduler started — running at 07:00 and 21:00 UTC.")
 
 while True:
     schedule.run_pending()
