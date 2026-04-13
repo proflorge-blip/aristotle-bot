@@ -12,6 +12,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from statistics import mean, stdev
+import anthropic
 
 # ─────────────────────────────────────────
 # CONFIGURATION
@@ -20,6 +21,7 @@ from statistics import mean, stdev
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 FREE_CHANNEL_ID    = os.environ.get("FREE_CHANNEL_ID")
 PAID_CHANNEL_ID    = os.environ.get("PAID_CHANNEL_ID")
+ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 
 DB_PATH = "aristotle.db"
 
@@ -602,6 +604,60 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> float:
 
 
 # ─────────────────────────────────────────
+# COMMENTARY
+# ─────────────────────────────────────────
+
+ARISTOTLE_SYSTEM_PROMPT = """
+You are Aristotle — a calm, precise Sui blockchain intelligence service.
+
+Voice rules:
+- Observational, never predictive
+- Quiet optimism, never hype
+- Never use: bullish, bearish, moon, dump, pumping, soaring, plunging
+- Never say "I" or refer to yourself
+- One sentence only
+- Data is the authority, not opinion
+
+Examples of good closing lines:
+"A quiet session — staking holds firm while price and volume pull back modestly toward equilibrium."
+"The ecosystem is absorbing the week's volatility without structural disruption."
+"Liquidity remains present; the question is whether volume follows."
+"A score of 57 reflects measured activity — no metric distressed, none elevated."
+"Staking continues to hold. That is the signal that matters most today."
+"""
+
+
+def generate_closing_line(data: dict) -> str:
+    """Sends brief data to Claude, returns one closing line.
+    Falls back to empty string if API call fails."""
+    try:
+        tvl_b   = (data.get("tvl") or 0) / 1_000_000_000
+        dex_m   = (data.get("dex_volume") or 0) / 1_000_000
+        staking = (data.get("staking_ratio") or 0) * 100
+        prompt = (
+            f"Given this Sui blockchain data, write one closing sentence for the brief:\n\n"
+            f"Price: ${data.get('sui_price', '—')} ({fmt_pct(data.get('sui_price_change_24h'))})\n"
+            f"TVL: ${tvl_b:.2f}B\n"
+            f"DEX Volume: ${dex_m:.1f}M\n"
+            f"Staking Rate: {staking:.1f}%\n"
+            f"Mean Reversion z-score: {data.get('mean_reversion', 0):+.2f}σ\n"
+            f"Logos Index: {data.get('logos_index', '—')}/100\n\n"
+            f"One sentence only. No preamble. No punctuation beyond the sentence itself."
+        )
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=100,
+            system=ARISTOTLE_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        log.warning(f"Commentary generation failed: {e}")
+        return ""
+
+
+# ─────────────────────────────────────────
 # FORMATTERS
 # ─────────────────────────────────────────
 
@@ -650,7 +706,7 @@ def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: 
         return "—"
 
 
-def format_free_brief(data: dict) -> str:
+def format_free_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 24
@@ -690,10 +746,13 @@ def format_free_brief(data: dict) -> str:
         lines.append(f"LOGOS INDEX  {logos_teaser}")
     lines.append(sep)
     lines.append("@aristotlesuiupdate")
+    if commentary:
+        lines.append("")
+        lines.append(commentary)
     return "\n".join(lines)
 
 
-def format_paid_brief(data: dict) -> str:
+def format_paid_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 26
@@ -754,6 +813,9 @@ def format_paid_brief(data: dict) -> str:
         f"LOGOS INDEX    {logos_str}",
         sep,
     ]
+    if commentary:
+        lines.append("")
+        lines.append(commentary)
     return "\n".join(lines)
 
 
@@ -835,8 +897,11 @@ def run():
     data["logos_index"] = calculate_logos_index(data, previous_index=prev_index)
     log.info(f"Logos Index: {data['logos_index']}")
 
-    free_brief = format_free_brief(data)
-    paid_brief = format_paid_brief(data)
+    commentary = generate_closing_line(data)
+    log.info(f"Commentary: {commentary or '(none)'}")
+
+    free_brief = format_free_brief(data, commentary)
+    paid_brief = format_paid_brief(data, commentary)
 
     log.info("\n" + "─"*40)
     log.info("FREE BRIEF:\n" + free_brief)
