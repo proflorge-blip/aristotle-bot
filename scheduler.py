@@ -28,8 +28,6 @@ schedule.every().day.at("19:00").do(job)
 
 log.info("Scheduler started — running at 07:00 and 19:00 UTC.")
 
-job()  # run immediately on startup
-
 while True:
     schedule.run_pending()
     time.sleep(30)
