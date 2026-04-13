@@ -549,23 +549,18 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "tvl":              0.25,  # primary ecosystem health signal
-    "staking_ratio":    0.23,  # long-run commitment signal
-    "stablecoin_mcap":  0.17,  # real economic demand on-chain
-    "sui_price":        0.15,  # price/sentiment — tightened range for current levels
-    "mean_reversion":   0.08,  # contrarian flag — dampened, not an override
-    "tx_count":         0.06,
-    "deepbook":         0.06,
-    # "network_fees":   0.08,  # TODO: add 7d avg network fees (V1.5)
+    "tvl":              0.30,  # primary ecosystem health signal
+    "staking_ratio":    0.22,  # long-run commitment signal
+    "stablecoin_mcap":  0.20,  # real economic demand on-chain
+    "deepbook":         0.15,  # SUI/USDC liquidity depth
+    "mean_reversion":   0.13,  # contrarian flag
 }
 
 RANGES = {
-    "tvl":              {"min": 200_000_000,   "max": 2_000_000_000},
-    "deepbook":         {"min": 0,             "max": 20_000_000},
-    "sui_price":        {"min": 0.5,           "max": 2.5},
+    "tvl":              {"min": 200_000_000,   "max": 800_000_000},
     "staking_ratio":    {"min": 0.40,          "max": 0.80},
-    "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_000_000_000},
-    "tx_count":         {"min": 0,             "max": 10_000_000},
+    "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_100_000_000},
+    "deepbook":         {"min": 0,             "max": 25_000_000},
 }
 
 DAMPENING_CAP = 10.0
@@ -594,11 +589,9 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> float:
     scores = {
         "tvl":              normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
         "staking_ratio":    normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
-        "mean_reversion":   zscore_to_score(data.get("mean_reversion", 0.0) or 0.0),
-        "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
         "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
-        "tx_count":         normalise(data.get("tx_12h_delta"), RANGES["tx_count"]["min"], RANGES["tx_count"]["max"]),
         "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
+        "mean_reversion":   zscore_to_score(data.get("mean_reversion", 0.0) or 0.0),
     }
     raw = max(1, min(100, sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)))
     if previous_index is not None:
