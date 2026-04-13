@@ -12,7 +12,6 @@ import logging
 import time
 from datetime import datetime, timezone
 from statistics import mean, stdev
-import anthropic
 
 # ─────────────────────────────────────────
 # CONFIGURATION
@@ -631,6 +630,7 @@ def generate_closing_line(data: dict) -> str:
     """Sends brief data to Claude, returns one closing line.
     Falls back to empty string if API call fails."""
     try:
+        import anthropic
         tvl_b   = (data.get("tvl") or 0) / 1_000_000_000
         dex_m   = (data.get("dex_volume") or 0) / 1_000_000
         staking = (data.get("staking_ratio") or 0) * 100
