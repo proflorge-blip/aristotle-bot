@@ -848,6 +848,66 @@ def post_to_telegram(channel_id: str, message: str) -> bool:
 
 
 # ─────────────────────────────────────────
+# WHY SUI
+# ─────────────────────────────────────────
+
+def format_why_sui() -> str:
+    sep = "─" * 26
+    lines = [
+        "ARISTOTLE · WHY SUI",
+        sep,
+        "",
+        "Sui is a Layer 1 blockchain",
+        "built for speed, scale, and",
+        "real on-chain ownership.",
+        "",
+        "BUILT DIFFERENT",
+        sep,
+        "Move language",
+        "  Assets are objects. Ownership",
+        "  is explicit at the protocol.",
+        "  Bugs cost less to make.",
+        "",
+        "Parallel execution",
+        "  Independent transactions run",
+        "  simultaneously. Throughput",
+        "  scales with validators.",
+        "",
+        "Sub-second finality",
+        "  Most transactions settle",
+        "  in under 500ms.",
+        "",
+        "No mempool",
+        "  Transactions route directly",
+        "  to validators. No fee auction,",
+        "  no front-running.",
+        "",
+        "WHAT ARISTOTLE TRACKS",
+        sep,
+        "TVL          on-chain capital",
+        "DEX VOL      daily activity",
+        "DEEPBOOK     order book depth",
+        "STAKING      long-run commitment",
+        "STBL MCAP    economic demand",
+        "LOGOS INDEX  composite health",
+        sep,
+        "@aristotlesuiupdate",
+    ]
+    return "\n".join(lines)
+
+
+def post_why_sui():
+    """Post the Why Sui page to both channels."""
+    page = format_why_sui()
+    log.info("\n" + "─"*40)
+    log.info("WHY SUI PAGE:\n" + page)
+    log.info("─"*40)
+    post_to_telegram(FREE_CHANNEL_ID, page)
+    post_to_telegram(PAID_CHANNEL_ID, page)
+    log.info("Why Sui posted.")
+
+
+# ─────────────────────────────────────────
 # MAIN PIPELINE
 # ─────────────────────────────────────────
 
@@ -919,4 +979,8 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--why-sui":
+        post_why_sui()
+    else:
+        run()
