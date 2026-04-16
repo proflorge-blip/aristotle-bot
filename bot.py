@@ -872,6 +872,13 @@ def run():
             data["deepbook_liquidity"] = last_db
             log.warning(f"DeepBook fetch returned 0 — using last known value: ${last_db:,.0f}")
 
+    # If DEX volume missing, use last known good value from DB
+    if not data.get("dex_volume"):
+        last_dex = get_previous_value("dex_volume")
+        if last_dex and last_dex > 0:
+            data["dex_volume"] = last_dex
+            log.warning(f"DEX volume fetch failed — using last known value: ${last_dex:,.0f}")
+
     # Calculate 7-day EMA for DeepBook
     data["deepbook_ema"] = calculate_deepbook_ema(data.get("deepbook_liquidity") or 0)
     log.info(f"DeepBook EMA (7d): {data['deepbook_ema']:,.0f}")
