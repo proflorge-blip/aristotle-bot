@@ -6,6 +6,7 @@ v3: Final formatting, locked metrics, arrows on Logos Index
 """
 
 import os
+import json
 import requests
 import sqlite3
 import logging
@@ -22,7 +23,18 @@ FREE_CHANNEL_ID    = os.environ.get("FREE_CHANNEL_ID")
 PAID_CHANNEL_ID    = os.environ.get("PAID_CHANNEL_ID")
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 
-DB_PATH = "aristotle.db"
+DB_PATH = "aristotle.db"  # SQLite fallback for local dev
+
+# PostgreSQL — Railway injects DATABASE_URL automatically; normalise postgres:// → postgresql://
+_DB_URL = os.environ.get("DATABASE_URL", "")
+if _DB_URL.startswith("postgres://"):
+    _DB_URL = "postgresql://" + _DB_URL[11:]
+_USE_PG = bool(_DB_URL)
+PH      = "%s" if _USE_PG else "?"  # SQL placeholder character
+
+# Object storage for nightly disaster-recovery backups (S3 or Cloudflare R2)
+S3_BUCKET       = os.environ.get("S3_BUCKET")
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")  # set for R2; omit for AWS S3
 
 STABLECOINS = {"USDC", "USDT", "USDE", "DAI", "BUCK", "SUIUSD", "AUSD", "FDUSD"}
 
@@ -49,45 +61,79 @@ log = logging.getLogger("aristotle")
 # DATABASE
 # ─────────────────────────────────────────
 
+def _connect():
+    """Return a DB connection — PostgreSQL when DATABASE_URL is set, SQLite otherwise."""
+    if _USE_PG:
+        import psycopg2
+        return psycopg2.connect(_DB_URL)
+    return sqlite3.connect(DB_PATH)
+
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS snapshots_v3 (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            sui_price REAL,
-            sui_price_change_24h REAL,
-            dex_volume REAL,
-            tvl REAL,
-            tvl_change_24h REAL,
-            active_addresses INTEGER,
-            deepbook_liquidity REAL,
-            deepbook_ema REAL,
-            deepbook_change REAL,
-            staking_ratio REAL,
-            tx_count_total INTEGER,
-            mean_reversion REAL,
-            mean_reversion_prev REAL,
-            logos_index REAL,
-            best_token_symbol TEXT,
-            best_token_change REAL
-        )
-    """)
+    if _USE_PG:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS snapshots_v3 (
+                id                   SERIAL PRIMARY KEY,
+                timestamp            TIMESTAMPTZ NOT NULL,
+                sui_price            DOUBLE PRECISION,
+                sui_price_change_24h DOUBLE PRECISION,
+                dex_volume           DOUBLE PRECISION,
+                tvl                  DOUBLE PRECISION,
+                tvl_change_24h       DOUBLE PRECISION,
+                active_addresses     INTEGER,
+                deepbook_liquidity   DOUBLE PRECISION,
+                deepbook_ema         DOUBLE PRECISION,
+                deepbook_change      DOUBLE PRECISION,
+                staking_ratio        DOUBLE PRECISION,
+                tx_count_total       BIGINT,
+                mean_reversion       DOUBLE PRECISION,
+                mean_reversion_prev  DOUBLE PRECISION,
+                logos_index          DOUBLE PRECISION,
+                best_token_symbol    TEXT,
+                best_token_change    DOUBLE PRECISION
+            )
+        """)
+    else:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS snapshots_v3 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                sui_price REAL,
+                sui_price_change_24h REAL,
+                dex_volume REAL,
+                tvl REAL,
+                tvl_change_24h REAL,
+                active_addresses INTEGER,
+                deepbook_liquidity REAL,
+                deepbook_ema REAL,
+                deepbook_change REAL,
+                staking_ratio REAL,
+                tx_count_total INTEGER,
+                mean_reversion REAL,
+                mean_reversion_prev REAL,
+                logos_index REAL,
+                best_token_symbol TEXT,
+                best_token_change REAL
+            )
+        """)
     conn.commit()
     conn.close()
-    log.info("Database ready.")
+    log.info(f"Database ready ({'PostgreSQL' if _USE_PG else 'SQLite'}).")
+
 
 def save_snapshot(data: dict):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
-    c.execute("""
+    ph = ", ".join([PH] * 17)
+    c.execute(f"""
         INSERT INTO snapshots_v3 (
             timestamp, sui_price, sui_price_change_24h, dex_volume,
             tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
             deepbook_ema, deepbook_change, staking_ratio, tx_count_total,
             mean_reversion, mean_reversion_prev, logos_index, best_token_symbol, best_token_change
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES ({ph})
     """, (
         data.get("timestamp"),
         data.get("sui_price"),
@@ -125,12 +171,12 @@ def seed_price_history():
         )
         r.raise_for_status()
         prices = r.json().get("prices", [])
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         c = conn.cursor()
         for ts_ms, price in prices[:-1]:  # exclude today — bot will insert current
             ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
             c.execute(
-                "INSERT INTO snapshots_v3 (timestamp, sui_price) VALUES (?, ?)",
+                f"INSERT INTO snapshots_v3 (timestamp, sui_price) VALUES ({PH}, {PH})",
                 (ts, round(price, 6))
             )
         conn.commit()
@@ -142,9 +188,9 @@ def seed_price_history():
 
 def get_price_history(days: int = 20) -> list:
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         c = conn.cursor()
-        c.execute("SELECT sui_price FROM snapshots_v3 ORDER BY id DESC LIMIT ?", (days,))
+        c.execute(f"SELECT sui_price FROM snapshots_v3 ORDER BY id DESC LIMIT {PH}", (days,))
         rows = c.fetchall()
         conn.close()
         return [r[0] for r in rows if r[0] is not None]
@@ -153,7 +199,7 @@ def get_price_history(days: int = 20) -> list:
 
 def get_previous_value(column: str):
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         c = conn.cursor()
         c.execute(f"SELECT {column} FROM snapshots_v3 ORDER BY id DESC LIMIT 1")
         row = c.fetchone()
@@ -161,6 +207,35 @@ def get_previous_value(column: str):
         return row[0] if row else None
     except Exception:
         return None
+
+
+def backup_to_object_storage():
+    """Export all snapshots to S3/Cloudflare R2 as a nightly disaster-recovery snapshot."""
+    if not S3_BUCKET:
+        log.info("S3_BUCKET not configured — skipping object storage backup")
+        return
+    try:
+        import boto3
+        conn = _connect()
+        c = conn.cursor()
+        c.execute("SELECT * FROM snapshots_v3 ORDER BY id DESC LIMIT 5000")
+        rows = c.fetchall()
+        columns = [desc[0] for desc in c.description]
+        conn.close()
+
+        records = [dict(zip(columns, row)) for row in rows]
+        payload = json.dumps(records, default=str).encode("utf-8")
+
+        s3_kwargs = {}
+        if S3_ENDPOINT_URL:
+            s3_kwargs["endpoint_url"] = S3_ENDPOINT_URL
+        s3 = boto3.client("s3", **s3_kwargs)
+
+        key = f"aristotle/snapshots_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.json"
+        s3.put_object(Bucket=S3_BUCKET, Key=key, Body=payload, ContentType="application/json")
+        log.info(f"Backup: s3://{S3_BUCKET}/{key} ({len(records)} records, {len(payload):,} bytes)")
+    except Exception as e:
+        log.error(f"Object storage backup failed: {e}")
 
 # ─────────────────────────────────────────
 # DATA FETCHERS
@@ -862,8 +937,9 @@ def run():
     db      = fetch_deepbook()
     staking = fetch_staking()
     tx      = fetch_tx_count()
+    aa      = fetch_active_addresses_blockberry()
 
-    data = {**cg, **dl, **sc, **db, **staking, **tx}
+    data = {**cg, **dl, **sc, **db, **staking, **tx, **aa}
 
     # If DeepBook returned 0 or None, use last known good value from DB
     if not data.get("deepbook_liquidity"):

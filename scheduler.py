@@ -7,9 +7,8 @@ Run this file to keep the bot alive.
 import schedule
 import time
 import logging
-import sqlite3
 from datetime import datetime, timezone
-from bot import run
+from bot import run, _connect, backup_to_object_storage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,23 +26,31 @@ def job():
 def hours_since_last_run() -> float:
     """Returns hours since last DB snapshot, or 99 if no data."""
     try:
-        conn = sqlite3.connect("aristotle.db")
-        row = conn.execute(
-            "SELECT timestamp FROM snapshots_v3 ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+        conn = _connect()
+        c = conn.cursor()
+        c.execute("SELECT timestamp FROM snapshots_v3 ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
         conn.close()
         if not row:
             return 99
-        last = datetime.fromisoformat(row[0])
+        last = datetime.fromisoformat(str(row[0]))
         if last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)
         return (datetime.now(timezone.utc) - last).total_seconds() / 3600
     except Exception:
         return 99
 
-# Schedule twice daily at UTC
+def backup_job():
+    log.info("Nightly backup triggered.")
+    try:
+        backup_to_object_storage()
+    except Exception as e:
+        log.error(f"Backup error: {e}")
+
+# Schedule twice-daily briefs and nightly backup
 schedule.every().day.at("07:00").do(job)
 schedule.every().day.at("19:00").do(job)
+schedule.every().day.at("00:00").do(backup_job)
 
 log.info("Scheduler started — running at 07:00 and 19:00 UTC.")
 
