@@ -66,6 +66,7 @@ def init_db():
             deepbook_ema REAL,
             deepbook_change REAL,
             staking_ratio REAL,
+            stablecoin_mcap REAL,
             tx_count_total INTEGER,
             mean_reversion REAL,
             mean_reversion_prev REAL,
@@ -85,9 +86,10 @@ def save_snapshot(data: dict):
         INSERT INTO snapshots_v3 (
             timestamp, sui_price, sui_price_change_24h, dex_volume,
             tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
-            deepbook_ema, deepbook_change, staking_ratio, tx_count_total,
-            mean_reversion, mean_reversion_prev, logos_index, best_token_symbol, best_token_change
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            deepbook_ema, deepbook_change, staking_ratio, stablecoin_mcap,
+            tx_count_total, mean_reversion, mean_reversion_prev, logos_index,
+            best_token_symbol, best_token_change
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get("timestamp"),
         data.get("sui_price"),
@@ -100,6 +102,7 @@ def save_snapshot(data: dict):
         data.get("deepbook_ema"),
         data.get("deepbook_change"),
         data.get("staking_ratio"),
+        data.get("stablecoin_mcap"),
         data.get("tx_count_total"),
         data.get("mean_reversion"),
         data.get("mean_reversion_prev"),
@@ -554,7 +557,15 @@ WEIGHTS = {
     "staking_ratio":    0.22,  # long-run commitment signal
     "stablecoin_mcap":  0.20,  # real economic demand on-chain
     "deepbook":         0.15,  # SUI/USDC liquidity depth
-    "mean_reversion":   0.13,  # contrarian flag
+    "mean_reversion":   0.13,  # contrarian flag — conditionally reduced in trends
+}
+
+FACTOR_LABELS = {
+    "tvl":              "capital depth",
+    "staking_ratio":    "staking commitment",
+    "stablecoin_mcap":  "stablecoin demand",
+    "deepbook":         "liquidity depth",
+    "mean_reversion":   "mean reversion",
 }
 
 RANGES = {
@@ -586,20 +597,41 @@ def zscore_to_score(z: float) -> float:
     return max(0, min(100, 50 - (z * 10)))
 
 
-def calculate_logos_index(data: dict, previous_index: float = None) -> float:
+def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
+    z = data.get("mean_reversion", 0.0) or 0.0
+
+    # Conditional mean reversion: halve MR weight when |z| > 1 (trend-fading)
+    weights = dict(WEIGHTS)
+    if abs(z) > 1.0:
+        freed = weights["mean_reversion"] * 0.5
+        weights["mean_reversion"] -= freed
+        other_keys = [k for k in weights if k != "mean_reversion"]
+        total_others = sum(weights[k] for k in other_keys)
+        for k in other_keys:
+            weights[k] += freed * (weights[k] / total_others)
+
     scores = {
         "tvl":              normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
         "staking_ratio":    normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
         "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
         "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
-        "mean_reversion":   zscore_to_score(data.get("mean_reversion", 0.0) or 0.0),
+        "mean_reversion":   zscore_to_score(z),
     }
-    raw = max(1, min(100, sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)))
+
+    contributions = {k: scores[k] * weights[k] for k in weights}
+    raw = max(1, min(100, sum(contributions.values())))
+
     if previous_index is not None:
         delta = raw - previous_index
         if abs(delta) > DAMPENING_CAP:
             raw = previous_index + (DAMPENING_CAP if delta > 0 else -DAMPENING_CAP)
-    return round(raw, 1)
+
+    raw = round(raw, 1)
+    top     = max(contributions, key=contributions.get)
+    lagging = min(contributions, key=contributions.get)
+    driver_line = f"Driven by {FACTOR_LABELS[top]}; {FACTOR_LABELS[lagging]} lagging"
+
+    return {"score": raw, "contributions": contributions, "driver_line": driver_line}
 
 
 # ─────────────────────────────────────────
@@ -824,8 +856,11 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         "",
         sep,
         f"LOGOS INDEX    {logos_str}",
-        sep,
     ]
+    driver = data.get("logos_driver", "")
+    if driver:
+        lines.append(driver)
+    lines.append(sep)
     if commentary:
         lines.append("")
         lines.append(commentary)
@@ -914,8 +949,11 @@ def run():
 
     # Logos Index
     prev_index = get_previous_value("logos_index")
-    data["logos_index"] = calculate_logos_index(data, previous_index=prev_index)
-    log.info(f"Logos Index: {data['logos_index']}")
+    logos_result = calculate_logos_index(data, previous_index=prev_index)
+    data["logos_index"]  = logos_result["score"]
+    data["logos_driver"] = logos_result["driver_line"]
+    log.info(f"Logos Index: {data['logos_index']} | {data['logos_driver']}")
+    log.info(f"Contributions: { {k: round(v, 1) for k, v in logos_result['contributions'].items()} }")
 
     commentary = generate_closing_line(data)
     log.info(f"Commentary: {commentary or '(none)'}")
