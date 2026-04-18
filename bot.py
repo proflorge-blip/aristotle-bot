@@ -627,9 +627,25 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
             raw = previous_index + (DAMPENING_CAP if delta > 0 else -DAMPENING_CAP)
 
     raw = round(raw, 1)
-    top     = max(contributions, key=contributions.get)
-    lagging = min(contributions, key=contributions.get)
-    driver_line = f"Driven by {FACTOR_LABELS[top]}; {FACTOR_LABELS[lagging]} lagging"
+    top_two  = sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:2]
+    lagging  = min(contributions, key=contributions.get)
+
+    def _fmt_factor(k):
+        if k == "tvl":              return f"TVL {fmt_large(data.get('tvl'))}"
+        if k == "staking_ratio":    return f"staking {(data.get('staking_ratio') or 0)*100:.1f}%"
+        if k == "stablecoin_mcap":  return f"stablecoin {fmt_large(data.get('stablecoin_mcap'))}"
+        if k == "deepbook":         return f"DeepBook {fmt_large(data.get('deepbook_ema'))}"
+        if k == "mean_reversion":   return f"mean rev {(data.get('mean_reversion') or 0):+.2f}σ"
+        return k
+
+    anchors = " and ".join(_fmt_factor(k) for k, _ in top_two)
+    price_change = data.get("sui_price_change_24h") or 0
+    if abs(price_change) >= 3:
+        suffix = f"; SUI price ({fmt_pct(price_change)}) excluded from index"
+    else:
+        suffix = f"; {FACTOR_LABELS[lagging]} provides least support"
+
+    driver_line = f"Score anchored by {anchors}{suffix}"
 
     return {"score": raw, "contributions": contributions, "driver_line": driver_line}
 
