@@ -553,11 +553,12 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "tvl":              0.30,  # primary ecosystem health signal
+    "tvl":              0.28,  # primary ecosystem health signal
     "staking_ratio":    0.22,  # long-run commitment signal
-    "stablecoin_mcap":  0.20,  # real economic demand on-chain
-    "deepbook":         0.15,  # SUI/USDC liquidity depth
-    "mean_reversion":   0.13,  # contrarian flag — conditionally reduced in trends
+    "stablecoin_mcap":  0.18,  # real economic demand on-chain
+    "deepbook":         0.12,  # SUI/USDC liquidity depth
+    "mean_reversion":   0.10,  # contrarian flag — conditionally reduced in trends
+    "sui_price":        0.10,  # price level as sentiment signal
 }
 
 FACTOR_LABELS = {
@@ -566,13 +567,15 @@ FACTOR_LABELS = {
     "stablecoin_mcap":  "stablecoin demand",
     "deepbook":         "liquidity depth",
     "mean_reversion":   "mean reversion",
+    "sui_price":        "SUI price",
 }
 
 RANGES = {
     "tvl":              {"min": 200_000_000,   "max": 800_000_000},
     "staking_ratio":    {"min": 0.40,          "max": 0.80},
     "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_100_000_000},
-    "deepbook":         {"min": 0,             "max": 25_000_000},
+    "deepbook":         {"min": 0,             "max": 50_000_000},
+    "sui_price":        {"min": 0.50,          "max": 2.50},
 }
 
 DAMPENING_CAP = 10.0
@@ -616,6 +619,7 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
         "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
         "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
         "mean_reversion":   zscore_to_score(z),
+        "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
     }
 
     contributions = {k: scores[k] * weights[k] for k in weights}
@@ -636,13 +640,14 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
         if k == "stablecoin_mcap":  return f"stablecoin {fmt_large(data.get('stablecoin_mcap'))}"
         if k == "deepbook":         return f"DeepBook {fmt_large(data.get('deepbook_ema'))}"
         if k == "mean_reversion":   return f"mean rev {(data.get('mean_reversion') or 0):+.2f}σ"
+        if k == "sui_price":        return f"SUI {fmt_price(data.get('sui_price'))}"
         return k
 
     anchors = " and ".join(_fmt_factor(k) for k, _ in top_two)
     price_change = data.get("sui_price_change_24h") or 0
     line1 = f"{anchors} are anchoring the score."
-    if abs(price_change) >= 3:
-        line2 = f"SUI price ({fmt_pct(price_change)}) is not a factor — it carries no index weight."
+    if lagging == "sui_price":
+        line2 = f"SUI price ({fmt_pct(price_change)}) is the weakest contributor at this level."
     else:
         line2 = f"{FACTOR_LABELS[lagging].capitalize()} is the weakest contributor and the main drag on a higher reading."
 
