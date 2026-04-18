@@ -646,8 +646,8 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
     anchors = " and ".join(_fmt_factor(k) for k, _ in top_two)
     price_change = data.get("sui_price_change_24h") or 0
     line1 = f"{anchors} are anchoring the score."
-    if lagging == "sui_price":
-        line2 = f"SUI price ({fmt_pct(price_change)}) is the weakest contributor at this level."
+    if lagging == "sui_price" and abs(price_change) >= 3:
+        line2 = f"SUI is down {fmt_pct(price_change)} and the weakest contributor; however, it's weighted at 10% so the drag on the overall score remains limited."
     else:
         line2 = f"{FACTOR_LABELS[lagging].capitalize()} is the weakest contributor and the main drag on a higher reading."
 
