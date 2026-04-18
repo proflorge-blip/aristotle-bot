@@ -616,13 +616,15 @@ Voice rules:
 - Never say "I" or refer to yourself
 - One sentence only
 - Data is the authority, not opinion
+- No vague macro terms (ecosystem, market conditions, environment) unless explicitly grounded in data — e.g. "TVL across top protocols" not "the ecosystem"
+- No standalone sentences — always require contrast or context between two metrics or signals
+- No questions — they introduce prediction pressure
 
 Examples of good closing lines:
-"A quiet session — staking holds firm while price and volume pull back modestly toward equilibrium."
-"The ecosystem is absorbing the week's volatility without structural disruption."
-"Liquidity remains present; the question is whether volume follows."
-"A score of 57 reflects measured activity — no metric distressed, none elevated."
-"Staking continues to hold. That is the signal that matters most today."
+"A quiet session — staking holds firm at 75% while DEX volume pulls back 18% from yesterday's peak."
+"TVL across Sui protocols holds at $585M despite a 16% drop in DEX volume, suggesting liquidity is present but inactive."
+"Price up 5.5% while mean reversion sits at +0.93σ — momentum exists but the index remains below its 20-day average."
+"A score of 57 reflects measured activity — staking steady at 75%, DeepBook EMA at $12M, no metric in distress."
 """
 
 
