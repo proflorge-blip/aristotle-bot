@@ -876,6 +876,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     ]
     driver = data.get("logos_driver", "")
     if driver:
+        lines.append("")
         lines.append(driver)
     lines.append(sep)
     if commentary:
