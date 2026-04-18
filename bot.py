@@ -640,12 +640,13 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
 
     anchors = " and ".join(_fmt_factor(k) for k, _ in top_two)
     price_change = data.get("sui_price_change_24h") or 0
+    line1 = f"{anchors} are anchoring the score."
     if abs(price_change) >= 3:
-        suffix = f"; SUI price ({fmt_pct(price_change)}) excluded from index"
+        line2 = f"SUI price ({fmt_pct(price_change)}) is not a factor — it carries no index weight."
     else:
-        suffix = f"; {FACTOR_LABELS[lagging]} provides least support"
+        line2 = f"{FACTOR_LABELS[lagging].capitalize()} is the weakest contributor and the main drag on a higher reading."
 
-    driver_line = f"Score anchored by {anchors}{suffix}"
+    driver_line = f"{line1}\n{line2}"
 
     return {"score": raw, "contributions": contributions, "driver_line": driver_line}
 
