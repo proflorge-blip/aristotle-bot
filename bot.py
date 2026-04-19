@@ -644,12 +644,35 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
         return k
 
     anchors = " and ".join(_fmt_factor(k) for k, _ in top_two)
-    price_change = data.get("sui_price_change_24h") or 0
     line1 = f"{anchors[0].upper()}{anchors[1:]} are anchoring the score."
-    if lagging == "sui_price" and abs(price_change) >= 3:
-        line2 = f"SUI is down {fmt_pct(price_change)} and the weakest contributor; however, it's weighted at 10% so the drag on the overall score remains limited."
+
+    # Line 2: reference what moved most negatively this session
+    session_changes = {}
+    if data.get("tvl_change_24h") is not None:
+        session_changes["TVL"] = data["tvl_change_24h"]
+    if data.get("sui_price_change_24h") is not None:
+        session_changes["SUI price"] = data["sui_price_change_24h"]
+
+    worst_name = min(session_changes, key=session_changes.get) if session_changes else None
+    worst_pct  = session_changes[worst_name] if worst_name else None
+
+    if worst_name and worst_pct is not None and worst_pct < -2:
+        if previous_index is not None:
+            index_delta = raw - previous_index
+            if index_delta < -0.5:
+                line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is the primary drag, softening the index {abs(index_delta):.1f} points."
+            elif index_delta > 0.5:
+                line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is offset by other factors, with the index firming {abs(index_delta):.1f} points."
+            else:
+                line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is the primary drag this session, though the index held broadly steady."
+        else:
+            line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is the primary drag this session."
     else:
-        line2 = f"{FACTOR_LABELS[lagging].capitalize()} is the weakest contributor and the main drag on a higher reading."
+        price_change = data.get("sui_price_change_24h") or 0
+        if lagging == "sui_price" and abs(price_change) >= 3:
+            line2 = f"SUI is down {fmt_pct(price_change)} and the weakest contributor; however, it's weighted at 10% so the drag on the overall score remains limited."
+        else:
+            line2 = f"{FACTOR_LABELS[lagging].capitalize()} is the weakest contributor this session."
 
     driver_line = f"{line1}\n\n{line2}"
 
