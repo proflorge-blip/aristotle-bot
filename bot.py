@@ -651,7 +651,7 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
     else:
         line2 = f"{FACTOR_LABELS[lagging].capitalize()} is the weakest contributor and the main drag on a higher reading."
 
-    driver_line = f"{line1}\n{line2}"
+    driver_line = f"{line1}\n\n{line2}"
 
     return {"score": raw, "contributions": contributions, "driver_line": driver_line}
 
