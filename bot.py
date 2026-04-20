@@ -784,6 +784,8 @@ def fmt_change(value):
     return f"{'+' if value >= 0 else ''}{value:.2f}"
 
 def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: float = 5.0) -> str:
+    if change_pct is None:
+        return "—"
     if change_pct >= major_threshold:
         return "▲"
     elif change_pct >= minor_threshold:
@@ -827,8 +829,8 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
         "ARISTOTLE · SUI UPDATE",
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
-        f"SUI        {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h') or 0)}",
-        f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h') or 0)}",
+        f"SUI        {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h'))}",
+        f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h'))}",
         f"DEX VOL    {dex_str}",
     ]
     if show_logos:
@@ -893,8 +895,8 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         "",
-        f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h') or 0)}",
-        f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h') or 0)}",
+        f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h'))}",
+        f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h'))}",
         f"DEX VOL        {dex_str}",
         f"DEEPBOOK       {db_str}",
         f"MEAN REV       {mr_str}",
@@ -958,6 +960,14 @@ def run():
     tx      = fetch_tx_count()
 
     data = {**cg, **dl, **sc, **db, **staking, **tx}
+
+    # If SUI price missing, use last known good value from DB
+    if not data.get("sui_price"):
+        last_price = get_previous_value("sui_price")
+        if last_price:
+            data["sui_price"] = last_price
+            data["sui_price_change_24h"] = None
+            log.warning(f"SUI price fetch failed — using last known: ${last_price:.4f}")
 
     # If DeepBook returned 0 or None, use last known good value from DB
     if not data.get("deepbook_liquidity"):
