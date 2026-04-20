@@ -4,10 +4,11 @@ Scheduler — runs bot.py at 07:00 and 19:00 UTC daily
 Run this file to keep the bot alive.
 """
 
+import os
 import schedule
 import time
 import logging
-import sqlite3
+import psycopg2
 from datetime import datetime, timezone
 from bot import run
 
@@ -16,6 +17,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger("scheduler")
+
+_raw_db_url = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = _raw_db_url.replace("postgres://", "postgresql://", 1)
 
 def job():
     log.info("Scheduled run triggered.")
@@ -27,10 +31,12 @@ def job():
 def hours_since_last_run() -> float:
     """Returns hours since last DB snapshot, or 99 if no data."""
     try:
-        conn = sqlite3.connect("aristotle.db")
-        row = conn.execute(
-            "SELECT timestamp FROM snapshots_v3 ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+        if not DATABASE_URL:
+            return 99
+        conn = psycopg2.connect(DATABASE_URL)
+        c = conn.cursor()
+        c.execute("SELECT timestamp FROM snapshots_v3 ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
         conn.close()
         if not row:
             return 99

@@ -7,7 +7,7 @@ v3: Final formatting, locked metrics, arrows on Logos Index
 
 import os
 import requests
-import sqlite3
+import psycopg2
 import logging
 import time
 from datetime import datetime, timezone
@@ -22,7 +22,8 @@ FREE_CHANNEL_ID    = os.environ.get("FREE_CHANNEL_ID")
 PAID_CHANNEL_ID    = os.environ.get("PAID_CHANNEL_ID")
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 
-DB_PATH = "aristotle.db"
+_raw_db_url = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = _raw_db_url.replace("postgres://", "postgresql://", 1)
 
 STABLECOINS = {"USDC", "USDT", "USDE", "DAI", "BUCK", "SUIUSD", "AUSD", "FDUSD"}
 
@@ -49,30 +50,34 @@ log = logging.getLogger("aristotle")
 # DATABASE
 # ─────────────────────────────────────────
 
+def get_db_conn():
+    return psycopg2.connect(DATABASE_URL)
+
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS snapshots_v3 (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             timestamp TEXT NOT NULL,
-            sui_price REAL,
-            sui_price_change_24h REAL,
-            dex_volume REAL,
-            tvl REAL,
-            tvl_change_24h REAL,
+            sui_price DOUBLE PRECISION,
+            sui_price_change_24h DOUBLE PRECISION,
+            dex_volume DOUBLE PRECISION,
+            tvl DOUBLE PRECISION,
+            tvl_change_24h DOUBLE PRECISION,
             active_addresses INTEGER,
-            deepbook_liquidity REAL,
-            deepbook_ema REAL,
-            deepbook_change REAL,
-            staking_ratio REAL,
-            stablecoin_mcap REAL,
+            deepbook_liquidity DOUBLE PRECISION,
+            deepbook_ema DOUBLE PRECISION,
+            deepbook_change DOUBLE PRECISION,
+            staking_ratio DOUBLE PRECISION,
+            stablecoin_mcap DOUBLE PRECISION,
             tx_count_total INTEGER,
-            mean_reversion REAL,
-            mean_reversion_prev REAL,
-            logos_index REAL,
+            mean_reversion DOUBLE PRECISION,
+            mean_reversion_prev DOUBLE PRECISION,
+            logos_index DOUBLE PRECISION,
             best_token_symbol TEXT,
-            best_token_change REAL
+            best_token_change DOUBLE PRECISION
         )
     """)
     conn.commit()
@@ -80,7 +85,7 @@ def init_db():
     log.info("Database ready.")
 
 def save_snapshot(data: dict):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute("""
         INSERT INTO snapshots_v3 (
@@ -89,7 +94,7 @@ def save_snapshot(data: dict):
             deepbook_ema, deepbook_change, staking_ratio, stablecoin_mcap,
             tx_count_total, mean_reversion, mean_reversion_prev, logos_index,
             best_token_symbol, best_token_change
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         data.get("timestamp"),
         data.get("sui_price"),
@@ -128,12 +133,12 @@ def seed_price_history():
         )
         r.raise_for_status()
         prices = r.json().get("prices", [])
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
         for ts_ms, price in prices[:-1]:  # exclude today — bot will insert current
             ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
             c.execute(
-                "INSERT INTO snapshots_v3 (timestamp, sui_price) VALUES (?, ?)",
+                "INSERT INTO snapshots_v3 (timestamp, sui_price) VALUES (%s, %s)",
                 (ts, round(price, 6))
             )
         conn.commit()
@@ -145,9 +150,9 @@ def seed_price_history():
 
 def get_price_history(days: int = 20) -> list:
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
-        c.execute("SELECT sui_price FROM snapshots_v3 ORDER BY id DESC LIMIT ?", (days,))
+        c.execute("SELECT sui_price FROM snapshots_v3 ORDER BY id DESC LIMIT %s", (days,))
         rows = c.fetchall()
         conn.close()
         return [r[0] for r in rows if r[0] is not None]
@@ -156,7 +161,7 @@ def get_price_history(days: int = 20) -> list:
 
 def get_previous_value(column: str):
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
         c.execute(f"SELECT {column} FROM snapshots_v3 ORDER BY id DESC LIMIT 1")
         row = c.fetchone()
@@ -526,9 +531,9 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
     Smooths intraday spikes.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
-        c.execute("SELECT deepbook_liquidity FROM snapshots_v3 ORDER BY id DESC LIMIT ?", (days * 2,))
+        c.execute("SELECT deepbook_liquidity FROM snapshots_v3 ORDER BY id DESC LIMIT %s", (days * 2,))
         rows = c.fetchall()
         conn.close()
         values = [r[0] for r in rows if r[0] is not None and r[0] > 0]
