@@ -159,6 +159,23 @@ def get_price_history(days: int = 20) -> list:
     except Exception:
         return []
 
+def get_price_24h_ago() -> float:
+    """Return SUI price from ~24h ago (2 snapshots back) for fallback change calculation."""
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute("SELECT sui_price FROM snapshots_v3 WHERE sui_price IS NOT NULL ORDER BY id DESC LIMIT 3")
+        rows = c.fetchall()
+        conn.close()
+        prices = [r[0] for r in rows if r[0] is not None]
+        if len(prices) >= 3:
+            return prices[2]
+        if len(prices) >= 2:
+            return prices[1]
+        return None
+    except Exception:
+        return None
+
 def get_previous_value(column: str):
     try:
         conn = get_db_conn()
@@ -973,6 +990,13 @@ def run():
             data["sui_price"] = last_price
             data["sui_price_change_24h"] = None
             log.warning(f"SUI price fetch failed — using last known: ${last_price:.4f}")
+
+    # If 24h change missing but price is known, calculate from DB (2 snapshots ≈ 24h)
+    if data.get("sui_price") and data.get("sui_price_change_24h") is None:
+        prev_price = get_price_24h_ago()
+        if prev_price and prev_price > 0:
+            data["sui_price_change_24h"] = ((data["sui_price"] - prev_price) / prev_price) * 100
+            log.info(f"Calculated SUI 24h change from DB: {data['sui_price_change_24h']:+.2f}%")
 
     # If DeepBook returned 0 or None, use last known good value from DB
     if not data.get("deepbook_liquidity"):
