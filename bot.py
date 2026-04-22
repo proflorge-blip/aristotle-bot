@@ -824,25 +824,24 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 24
+    V = 9  # value column width
 
     leader_str = "—"
     if data.get("best_token_symbol") and data.get("best_token_change") is not None:
         leader_str = f"{data['best_token_symbol']} {fmt_pct(data['best_token_change'])}"
 
-    # DEX VOL with change vs previous snapshot
+    # DEX VOL change vs previous snapshot
     prev_dex = get_previous_value("dex_volume")
     curr_dex = data.get("dex_volume")
-    dex_str = fmt_large(curr_dex)
     if prev_dex and curr_dex and prev_dex > 0:
-        dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
-        dex_str += f"   {fmt_pct(dex_change)}"
+        dex_change_str = fmt_pct(((curr_dex - prev_dex) / prev_dex) * 100)
     else:
-        dex_str += "   +0.00%"
+        dex_change_str = "+0.00%"
 
     # Show Logos Index teaser on Monday 07:00 and Friday 21:00
     show_logos = (
-        (now.weekday() == 0 and now.hour < 14) or   # Monday morning
-        (now.weekday() == 4 and now.hour >= 14)       # Friday evening
+        (now.weekday() == 0 and now.hour < 14) or
+        (now.weekday() == 4 and now.hour >= 14)
     )
     logos = data.get("logos_index")
     logos_teaser = f"{logos:.1f}/100" if logos is not None else "—"
@@ -851,9 +850,9 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
         "ARISTOTLE · SUI UPDATE",
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
-        f"SUI        {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h'))}",
-        f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h'))}",
-        f"DEX VOL    {dex_str}",
+        f"SUI        {fmt_price(data.get('sui_price')):<{V}}  {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h'))}",
+        f"TVL        {fmt_large(data.get('tvl')):<{V}}  {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h'))}",
+        f"DEX VOL    {fmt_large(curr_dex):<{V}}  {dex_change_str}",
     ]
     if show_logos:
         lines.append(sep)
@@ -870,61 +869,56 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
     sep = "─" * 26
+    V = 9  # value column width
 
-    # DeepBook with change
+    # DeepBook
     prev_db = get_previous_value("deepbook_liquidity")
     curr_db = data.get("deepbook_liquidity")
-    db_str = fmt_large(curr_db)
     if prev_db and curr_db and prev_db > 0:
-        db_change = ((curr_db - prev_db) / prev_db) * 100
-        db_str += f"    {fmt_pct(db_change)} {get_arrow(db_change)}"
+        db_change_str = f"{fmt_pct(((curr_db - prev_db) / prev_db) * 100)} {get_arrow(((curr_db - prev_db) / prev_db) * 100)}"
     else:
-        db_str += "    +0.00%"
+        db_change_str = "+0.00%"
 
-    # Mean reversion with change vs previous
+    # Mean reversion
     prev_mr = get_previous_value("mean_reversion")
     curr_mr = data.get("mean_reversion")
-    mr_str = f"{curr_mr:+.2f}σ" if curr_mr is not None else "—"
+    mr_val = f"{curr_mr:+.2f}σ" if curr_mr is not None else "—"
     if prev_mr is not None and curr_mr is not None:
         mr_change = curr_mr - prev_mr
-        mr_str += f"    {fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
+        mr_change_str = f"{fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
     else:
-        mr_str += "     +0.00"
+        mr_change_str = "+0.00"
 
-    # Logos Index with arrow and point change
+    # Logos Index
     prev_logos = get_previous_value("logos_index")
     curr_logos = data.get("logos_index")
-    logos_str = f"{curr_logos:.1f}/100" if curr_logos is not None else "—"
+    logos_val = f"{curr_logos:.1f}/100" if curr_logos is not None else "—"
     if prev_logos is not None and curr_logos is not None:
-        delta = curr_logos - prev_logos
-        arrow = get_arrow(delta)
-        logos_str += f"  {arrow}"
+        logos_arrow = get_arrow(curr_logos - prev_logos)
     else:
-        logos_str += "  —"
+        logos_arrow = "—"
 
-    # DEX VOL with change vs previous snapshot
+    # DEX VOL
     prev_dex = get_previous_value("dex_volume")
     curr_dex = data.get("dex_volume")
-    dex_str = fmt_large(curr_dex)
     if prev_dex and curr_dex and prev_dex > 0:
-        dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
-        dex_str += f"   {fmt_pct(dex_change)} {get_arrow(dex_change)}"
+        dex_change_str = f"{fmt_pct(((curr_dex - prev_dex) / prev_dex) * 100)} {get_arrow(((curr_dex - prev_dex) / prev_dex) * 100)}"
     else:
-        dex_str += "   +0.00%"
+        dex_change_str = "+0.00%"
 
     lines = [
         "ARISTOTLE · SUI LOGOS",
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         "",
-        f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h'))}",
-        f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h'))}",
-        f"DEX VOL        {dex_str}",
-        f"DEEPBOOK       {db_str}",
-        f"MEAN REV       {mr_str}",
+        f"SUI            {fmt_price(data.get('sui_price')):<{V}}  {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h'))}",
+        f"TVL            {fmt_large(data.get('tvl')):<{V}}  {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h'))}",
+        f"DEX VOL        {fmt_large(curr_dex):<{V}}  {dex_change_str}",
+        f"DEEPBOOK       {fmt_large(curr_db):<{V}}  {db_change_str}",
+        f"MEAN REV       {mr_val:<{V}}  {mr_change_str}",
         "",
         sep,
-        f"LOGOS INDEX    {logos_str}",
+        f"LOGOS INDEX    {logos_val}  {logos_arrow}",
     ]
     driver = data.get("logos_driver", "")
     if driver:
