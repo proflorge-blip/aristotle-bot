@@ -837,7 +837,7 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
         dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
         dex_str += f"   {fmt_pct(dex_change)}"
     else:
-        dex_str += "   —"
+        dex_str += "   +0.00%"
 
     # Show Logos Index teaser on Monday 07:00 and Friday 21:00
     show_logos = (
@@ -879,7 +879,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         db_change = ((curr_db - prev_db) / prev_db) * 100
         db_str += f"    {fmt_pct(db_change)} {get_arrow(db_change)}"
     else:
-        db_str += "    —"
+        db_str += "    +0.00%"
 
     # Mean reversion with change vs previous
     prev_mr = get_previous_value("mean_reversion")
@@ -889,7 +889,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         mr_change = curr_mr - prev_mr
         mr_str += f"    {fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
     else:
-        mr_str += "     —"
+        mr_str += "     +0.00"
 
     # Logos Index with arrow and point change
     prev_logos = get_previous_value("logos_index")
@@ -910,7 +910,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
         dex_str += f"   {fmt_pct(dex_change)} {get_arrow(dex_change)}"
     else:
-        dex_str += "   —"
+        dex_str += "   +0.00%"
 
     lines = [
         "ARISTOTLE · SUI LOGOS",
