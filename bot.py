@@ -85,38 +85,42 @@ def init_db():
     log.info("Database ready.")
 
 def save_snapshot(data: dict):
-    conn = get_db_conn()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO snapshots_v3 (
-            timestamp, sui_price, sui_price_change_24h, dex_volume,
-            tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
-            deepbook_ema, deepbook_change, staking_ratio, stablecoin_mcap,
-            tx_count_total, mean_reversion, mean_reversion_prev, logos_index,
-            best_token_symbol, best_token_change
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (
-        data.get("timestamp"),
-        data.get("sui_price"),
-        data.get("sui_price_change_24h"),
-        data.get("dex_volume"),
-        data.get("tvl"),
-        data.get("tvl_change_24h"),
-        data.get("active_addresses"),
-        data.get("deepbook_liquidity"),
-        data.get("deepbook_ema"),
-        data.get("deepbook_change"),
-        data.get("staking_ratio"),
-        data.get("stablecoin_mcap"),
-        data.get("tx_count_total"),
-        data.get("mean_reversion"),
-        data.get("mean_reversion_prev"),
-        data.get("logos_index"),
-        data.get("best_token_symbol"),
-        data.get("best_token_change"),
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO snapshots_v3 (
+                timestamp, sui_price, sui_price_change_24h, dex_volume,
+                tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
+                deepbook_ema, deepbook_change, staking_ratio, stablecoin_mcap,
+                tx_count_total, mean_reversion, mean_reversion_prev, logos_index,
+                best_token_symbol, best_token_change
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            data.get("timestamp"),
+            data.get("sui_price"),
+            data.get("sui_price_change_24h"),
+            data.get("dex_volume"),
+            data.get("tvl"),
+            data.get("tvl_change_24h"),
+            data.get("active_addresses"),
+            data.get("deepbook_liquidity"),
+            data.get("deepbook_ema"),
+            data.get("deepbook_change"),
+            data.get("staking_ratio"),
+            data.get("stablecoin_mcap"),
+            data.get("tx_count_total"),
+            data.get("mean_reversion"),
+            data.get("mean_reversion_prev"),
+            data.get("logos_index"),
+            data.get("best_token_symbol"),
+            data.get("best_token_change"),
+        ))
+        conn.commit()
+        conn.close()
+        log.info("Snapshot saved to database.")
+    except Exception as e:
+        log.error(f"save_snapshot FAILED — changes will not persist: {e}")
 
 def seed_price_history():
     """Seed DB with 20 days of historical SUI prices from CoinGecko if not enough history."""
