@@ -6,6 +6,7 @@ v3: Final formatting, locked metrics, arrows on Logos Index
 """
 
 import os
+import hashlib
 import requests
 import psycopg2
 import logging
@@ -190,6 +191,19 @@ def get_previous_value(column: str):
         return row[0] if row else None
     except Exception:
         return None
+
+def get_previous_values(*columns) -> dict:
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute(f"SELECT {', '.join(columns)} FROM snapshots_v3 ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return {col: None for col in columns}
+        return dict(zip(columns, row))
+    except Exception:
+        return {col: None for col in columns}
 
 # ─────────────────────────────────────────
 # DATA FETCHERS
@@ -606,6 +620,44 @@ RANGES = {
 
 DAMPENING_CAP = 10.0
 
+ANCHOR_TEMPLATES = [
+    "{a} and {b} are anchoring the score.",
+    "The score is underpinned by {a} and {b}.",
+    "{a} and {b} hold the index in place.",
+    "With {a} and {b} elevated, the score holds firm.",
+    "{a} leads the index, supported by {b}.",
+]
+
+ANCHOR_SAME_TEMPLATES = [
+    "The leading factors are unchanged — {a} and {b} continue to hold.",
+    "{a} and {b} dominate again this session.",
+    "No rotation in the top factors — {a} and {b} hold position.",
+    "{a} and {b} remain the dominant contributors.",
+]
+
+
+def _get_prev_top_two() -> list:
+    """Return the two highest-contributing factor keys from the previous snapshot."""
+    try:
+        prev = get_previous_values(
+            "sui_price", "staking_ratio", "tvl",
+            "stablecoin_mcap", "deepbook_ema", "mean_reversion"
+        )
+        if all(v is None for v in prev.values()):
+            return []
+        scores = {
+            "tvl":             normalise(prev["tvl"], RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
+            "staking_ratio":   normalise(prev["staking_ratio"], RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
+            "stablecoin_mcap": normalise(prev["stablecoin_mcap"], RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
+            "deepbook":        normalise(prev["deepbook_ema"], RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
+            "mean_reversion":  zscore_to_score(prev["mean_reversion"] or 0.0),
+            "sui_price":       normalise(prev["sui_price"], RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
+        }
+        contributions = {k: scores[k] * WEIGHTS[k] for k in WEIGHTS}
+        return [k for k, _ in sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:2]]
+    except Exception:
+        return []
+
 
 def normalise(value, min_val, max_val) -> float:
     if value is None:
@@ -626,7 +678,7 @@ def zscore_to_score(z: float) -> float:
     return max(0, min(100, 50 - (z * 10)))
 
 
-def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
+def calculate_logos_index(data: dict, previous_index: float = None, prev_top_two: list = None) -> dict:
     z = data.get("mean_reversion", 0.0) or 0.0
 
     # Conditional mean reversion: halve MR weight when |z| > 1 (trend-fading)
@@ -669,8 +721,22 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> dict:
         if k == "sui_price":        return f"SUI {fmt_price(data.get('sui_price'))}"
         return k
 
-    anchors = " and ".join(_fmt_factor(k) for k, _ in top_two)
-    line1 = f"{anchors[0].upper()}{anchors[1:]} are anchoring the score."
+    current_top_keys = [k for k, _ in top_two]
+    a_fmt = _fmt_factor(current_top_keys[0])
+    b_fmt = _fmt_factor(current_top_keys[1])
+
+    try:
+        dt = datetime.fromisoformat(data.get("timestamp") or "")
+        slot = dt.timetuple().tm_yday * 2 + (1 if dt.hour >= 14 else 0)
+    except Exception:
+        slot = int(hashlib.md5((data.get("timestamp") or "").encode()).hexdigest()[:6], 16)
+    if prev_top_two and set(current_top_keys) == set(prev_top_two):
+        tmpl = ANCHOR_SAME_TEMPLATES[slot % len(ANCHOR_SAME_TEMPLATES)]
+    else:
+        tmpl = ANCHOR_TEMPLATES[slot % len(ANCHOR_TEMPLATES)]
+
+    line1_raw = tmpl.format(a=a_fmt, b=b_fmt)
+    line1 = f"{line1_raw[0].upper()}{line1_raw[1:]}"
 
     # Line 2: reference what moved most negatively this session
     session_changes = {}
@@ -1031,8 +1097,9 @@ def run():
         data["tx_12h_delta"] = None
 
     # Logos Index
+    prev_top_two = _get_prev_top_two()
     prev_index = get_previous_value("logos_index")
-    logos_result = calculate_logos_index(data, previous_index=prev_index)
+    logos_result = calculate_logos_index(data, previous_index=prev_index, prev_top_two=prev_top_two)
     data["logos_index"]  = logos_result["score"]
     data["logos_driver"] = logos_result["driver_line"]
     log.info(f"Logos Index: {data['logos_index']} | {data['logos_driver']}")
