@@ -67,13 +67,13 @@ def init_db():
             dex_volume DOUBLE PRECISION,
             tvl DOUBLE PRECISION,
             tvl_change_24h DOUBLE PRECISION,
-            active_addresses INTEGER,
+            active_addresses BIGINT,
             deepbook_liquidity DOUBLE PRECISION,
             deepbook_ema DOUBLE PRECISION,
             deepbook_change DOUBLE PRECISION,
             staking_ratio DOUBLE PRECISION,
             stablecoin_mcap DOUBLE PRECISION,
-            tx_count_total INTEGER,
+            tx_count_total BIGINT,
             mean_reversion DOUBLE PRECISION,
             mean_reversion_prev DOUBLE PRECISION,
             logos_index DOUBLE PRECISION,
@@ -81,6 +81,9 @@ def init_db():
             best_token_change DOUBLE PRECISION
         )
     """)
+    # Ensure existing table has BIGINT for large counters
+    c.execute("ALTER TABLE snapshots_v3 ALTER COLUMN tx_count_total TYPE BIGINT")
+    c.execute("ALTER TABLE snapshots_v3 ALTER COLUMN active_addresses TYPE BIGINT")
     conn.commit()
     conn.close()
     log.info("Database ready.")
