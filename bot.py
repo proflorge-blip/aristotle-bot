@@ -893,7 +893,7 @@ def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: 
 
 def format_free_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
     sep = "─" * 24
     V = 9  # value column width
 
@@ -938,7 +938,7 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
 
 def format_paid_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
     sep = "─" * 26
     V = 9  # value column width
 
