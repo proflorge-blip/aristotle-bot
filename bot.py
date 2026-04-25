@@ -883,14 +883,12 @@ def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: 
         return "—"
     if change_pct >= major_threshold:
         return "▲"
-    elif change_pct >= minor_threshold:
+    elif change_pct >= 0:
         return "△"
-    elif change_pct <= -major_threshold:
-        return "▼"
-    elif change_pct <= -minor_threshold:
+    elif change_pct > -major_threshold:
         return "▽"
     else:
-        return "="
+        return "▼"
 
 
 def format_free_brief(data: dict, commentary: str = "") -> str:
