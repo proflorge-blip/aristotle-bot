@@ -995,7 +995,6 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     if driver:
         lines.append("")
         lines.append(driver)
-    lines.append(sep)
     if commentary:
         lines.append("")
         lines.append(commentary)
