@@ -1028,18 +1028,17 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         f"LOGOS INDEX    {logos_val}  {logos_change_str}",
     ]
 
-    result = f"<pre>{chr(10).join(lines)}</pre>"
-
     driver = data.get("logos_driver", "")
     if driver:
-        parts = driver.split("\n\n")
-        driver_html = "\n\n".join(f"<b>·</b> {part}" for part in parts)
-        result += f"\n\n{driver_html}"
+        lines.append("")
+        for part in driver.split("\n\n"):
+            lines.append(f"/ {part}")
 
     if commentary:
-        result += f"\n\n{commentary}"
+        lines.append("")
+        lines.append(commentary)
 
-    return result
+    return f"<pre>{chr(10).join(lines)}</pre>"
 
 
 # ─────────────────────────────────────────
