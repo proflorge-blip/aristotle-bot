@@ -993,7 +993,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     driver = data.get("logos_driver", "")
     if driver:
         lines.append("")
-        prefixed = "\n\n".join(f"/ {part}" for part in driver.split("\n\n"))
+        prefixed = "\n\n".join(f"· {part}" for part in driver.split("\n\n"))
         lines.append(prefixed)
     if commentary:
         lines.append("")
