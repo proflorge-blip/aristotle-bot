@@ -987,14 +987,14 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         f"DEX VOL        {fmt_large(curr_dex):<{V}}  {dex_change_str}",
         f"DEEPBOOK       {fmt_large(curr_db):<{V}}  {db_change_str}",
         f"MEAN REV       {mr_val:<{V}}  {mr_change_str}",
-        "",
         sep,
         f"LOGOS INDEX    {logos_val}  {logos_arrow}",
     ]
     driver = data.get("logos_driver", "")
     if driver:
         lines.append("")
-        lines.append(driver)
+        prefixed = "\n\n".join(f"/ {part}" for part in driver.split("\n\n"))
+        lines.append(prefixed)
     if commentary:
         lines.append("")
         lines.append(commentary)
