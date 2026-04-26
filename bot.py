@@ -1001,6 +1001,15 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     else:
         logos_change_str = "—"
 
+    # Staking
+    prev_staking = get_previous_value("staking_ratio")
+    curr_staking = data.get("staking_ratio")
+    staking_val = f"{(curr_staking or 0)*100:.1f}%" if curr_staking is not None else "—"
+    if prev_staking and curr_staking and prev_staking > 0:
+        staking_change_str = fmt_with_arrow(((curr_staking - prev_staking) / prev_staking) * 100)
+    else:
+        staking_change_str = "+0.0% •"
+
     # DEX VOL
     prev_dex = get_previous_value("dex_volume")
     curr_dex = data.get("dex_volume")
@@ -1016,6 +1025,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         "",
         f"SUI            {fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
         f"TVL            {fmt_large(data.get('tvl')):<{V}}  {fmt_with_arrow(data.get('tvl_change_24h'))}",
+        f"STAKING        {staking_val:<{V}}  {staking_change_str}",
         f"DEX VOL        {fmt_large(curr_dex):<{V}}  {dex_change_str}",
         f"DEEPBOOK       {fmt_large(curr_db):<{V}}  {db_change_str}",
         f"MEAN REV       {mr_val:<{V}}  {mr_change_str}",
