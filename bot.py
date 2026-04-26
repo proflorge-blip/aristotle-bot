@@ -622,19 +622,17 @@ def calculate_dex_ema(current_value: float, days: int = 7) -> float:
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "tvl":              0.25,  # primary ecosystem health signal
-    "staking_ratio":    0.20,  # long-run commitment signal
-    "stablecoin_mcap":  0.16,  # real economic demand on-chain
-    "dex_volume":       0.10,  # active economic throughput (7d EMA)
-    "deepbook":         0.10,  # SUI/USDC liquidity depth
-    "mean_reversion":   0.09,  # contrarian flag — conditionally reduced in trends
-    "sui_price":        0.10,  # price level as sentiment signal
+    "tvl":              0.30,  # primary ecosystem health signal
+    "staking_ratio":    0.24,  # long-run commitment signal
+    "dex_volume":       0.12,  # active economic throughput (7d EMA)
+    "sui_price":        0.12,  # price level as sentiment signal
+    "deepbook":         0.11,  # SUI/USDC liquidity depth
+    "mean_reversion":   0.11,  # contrarian flag — conditionally reduced in trends
 }
 
 FACTOR_LABELS = {
     "tvl":              "capital depth",
     "staking_ratio":    "staking commitment",
-    "stablecoin_mcap":  "stablecoin demand",
     "dex_volume":       "DEX volume",
     "deepbook":         "liquidity depth",
     "mean_reversion":   "mean reversion",
@@ -644,7 +642,6 @@ FACTOR_LABELS = {
 RANGES = {
     "tvl":              {"min": 200_000_000,   "max": 800_000_000},
     "staking_ratio":    {"min": 0.40,          "max": 0.80},
-    "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_100_000_000},
     "dex_volume":       {"min": 10_000_000,    "max": 150_000_000},
     "deepbook":         {"min": 0,             "max": 50_000_000},
     "sui_price":        {"min": 0.50,          "max": 2.50},
@@ -673,18 +670,17 @@ def _get_prev_top_two() -> list:
     try:
         prev = get_previous_values(
             "sui_price", "staking_ratio", "tvl",
-            "stablecoin_mcap", "deepbook_ema", "mean_reversion", "dex_ema"
+            "deepbook_ema", "mean_reversion", "dex_ema"
         )
         if all(v is None for v in prev.values()):
             return []
         scores = {
-            "tvl":             normalise(prev["tvl"], RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
-            "staking_ratio":   normalise(prev["staking_ratio"], RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
-            "stablecoin_mcap": normalise(prev["stablecoin_mcap"], RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
-            "dex_volume":      normalise(prev["dex_ema"], RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
-            "deepbook":        normalise(prev["deepbook_ema"], RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
-            "mean_reversion":  zscore_to_score(prev["mean_reversion"] or 0.0),
-            "sui_price":       normalise(prev["sui_price"], RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
+            "tvl":            normalise(prev["tvl"], RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
+            "staking_ratio":  normalise(prev["staking_ratio"], RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
+            "dex_volume":     normalise(prev["dex_ema"], RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
+            "deepbook":       normalise(prev["deepbook_ema"], RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
+            "mean_reversion": zscore_to_score(prev["mean_reversion"] or 0.0),
+            "sui_price":      normalise(prev["sui_price"], RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
         }
         contributions = {k: scores[k] * WEIGHTS[k] for k in WEIGHTS}
         return [k for k, _ in sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:2]]
@@ -725,13 +721,12 @@ def calculate_logos_index(data: dict, previous_index: float = None, prev_top_two
             weights[k] += freed * (weights[k] / total_others)
 
     scores = {
-        "tvl":              normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
-        "staking_ratio":    normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
-        "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
-        "dex_volume":       normalise(data.get("dex_ema"), RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
-        "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
-        "mean_reversion":   zscore_to_score(z),
-        "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
+        "tvl":            normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
+        "staking_ratio":  normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
+        "dex_volume":     normalise(data.get("dex_ema"), RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
+        "deepbook":       normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
+        "mean_reversion": zscore_to_score(z),
+        "sui_price":      normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
     }
 
     contributions = {k: scores[k] * weights[k] for k in weights}
