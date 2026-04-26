@@ -967,9 +967,12 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     curr_logos = data.get("logos_index")
     logos_val = f"{curr_logos:.1f}/100" if curr_logos is not None else "—"
     if prev_logos is not None and curr_logos is not None:
-        logos_arrow = get_arrow(curr_logos - prev_logos)
+        logos_delta = curr_logos - prev_logos
+        logos_arrow = get_arrow(logos_delta)
+        sign = "+" if logos_delta >= 0 else ""
+        logos_change_str = f"({sign}{logos_delta:.1f} {logos_arrow})"
     else:
-        logos_arrow = "—"
+        logos_change_str = "—"
 
     # DEX VOL
     prev_dex = get_previous_value("dex_volume")
@@ -990,7 +993,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         f"DEEPBOOK       {fmt_large(curr_db):<{V}}  {db_change_str}",
         f"MEAN REV       {mr_val:<{V}}  {mr_change_str}",
         sep,
-        f"LOGOS INDEX    {logos_val}  {logos_arrow}",
+        f"LOGOS INDEX    {logos_val}  {logos_change_str}",
     ]
 
     result = f"<pre>{chr(10).join(lines)}</pre>"
