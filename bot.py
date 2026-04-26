@@ -84,6 +84,8 @@ def init_db():
     # Ensure existing table has BIGINT for large counters
     c.execute("ALTER TABLE snapshots_v3 ALTER COLUMN tx_count_total TYPE BIGINT")
     c.execute("ALTER TABLE snapshots_v3 ALTER COLUMN active_addresses TYPE BIGINT")
+    # Add dex_ema column if not already present
+    c.execute("ALTER TABLE snapshots_v3 ADD COLUMN IF NOT EXISTS dex_ema DOUBLE PRECISION")
     conn.commit()
     conn.close()
     log.info("Database ready.")
@@ -98,8 +100,8 @@ def save_snapshot(data: dict):
                 tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
                 deepbook_ema, deepbook_change, staking_ratio, stablecoin_mcap,
                 tx_count_total, mean_reversion, mean_reversion_prev, logos_index,
-                best_token_symbol, best_token_change
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                best_token_symbol, best_token_change, dex_ema
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             data.get("timestamp"),
             data.get("sui_price"),
@@ -119,6 +121,7 @@ def save_snapshot(data: dict):
             data.get("logos_index"),
             data.get("best_token_symbol"),
             data.get("best_token_change"),
+            data.get("dex_ema"),
         ))
         conn.commit()
         conn.close()
@@ -591,16 +594,40 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
     return round(ema, 2)
 
 
+def calculate_dex_ema(current_value: float, days: int = 7) -> float:
+    """Calculate 7-day EMA of DEX volume from DB snapshots. Smooths daily spikes."""
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute("SELECT dex_volume FROM snapshots_v3 ORDER BY id DESC LIMIT %s", (days * 2,))
+        rows = c.fetchall()
+        conn.close()
+        values = [r[0] for r in rows if r[0] is not None and r[0] > 0]
+    except Exception:
+        values = []
+
+    if not values:
+        return current_value or 0
+
+    k = 2 / (days + 1)
+    ema = values[-1]
+    for v in reversed(values[:-1]):
+        ema = v * k + ema * (1 - k)
+    ema = current_value * k + ema * (1 - k)
+    return round(ema, 2)
+
+
 # ─────────────────────────────────────────
 # LOGOS INDEX
 # ─────────────────────────────────────────
 
 WEIGHTS = {
-    "tvl":              0.28,  # primary ecosystem health signal
-    "staking_ratio":    0.22,  # long-run commitment signal
-    "stablecoin_mcap":  0.18,  # real economic demand on-chain
-    "deepbook":         0.12,  # SUI/USDC liquidity depth
-    "mean_reversion":   0.10,  # contrarian flag — conditionally reduced in trends
+    "tvl":              0.25,  # primary ecosystem health signal
+    "staking_ratio":    0.20,  # long-run commitment signal
+    "stablecoin_mcap":  0.16,  # real economic demand on-chain
+    "dex_volume":       0.10,  # active economic throughput (7d EMA)
+    "deepbook":         0.10,  # SUI/USDC liquidity depth
+    "mean_reversion":   0.09,  # contrarian flag — conditionally reduced in trends
     "sui_price":        0.10,  # price level as sentiment signal
 }
 
@@ -608,6 +635,7 @@ FACTOR_LABELS = {
     "tvl":              "capital depth",
     "staking_ratio":    "staking commitment",
     "stablecoin_mcap":  "stablecoin demand",
+    "dex_volume":       "DEX volume",
     "deepbook":         "liquidity depth",
     "mean_reversion":   "mean reversion",
     "sui_price":        "SUI price",
@@ -617,6 +645,7 @@ RANGES = {
     "tvl":              {"min": 200_000_000,   "max": 800_000_000},
     "staking_ratio":    {"min": 0.40,          "max": 0.80},
     "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_100_000_000},
+    "dex_volume":       {"min": 10_000_000,    "max": 150_000_000},
     "deepbook":         {"min": 0,             "max": 50_000_000},
     "sui_price":        {"min": 0.50,          "max": 2.50},
 }
@@ -644,7 +673,7 @@ def _get_prev_top_two() -> list:
     try:
         prev = get_previous_values(
             "sui_price", "staking_ratio", "tvl",
-            "stablecoin_mcap", "deepbook_ema", "mean_reversion"
+            "stablecoin_mcap", "deepbook_ema", "mean_reversion", "dex_ema"
         )
         if all(v is None for v in prev.values()):
             return []
@@ -652,6 +681,7 @@ def _get_prev_top_two() -> list:
             "tvl":             normalise(prev["tvl"], RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
             "staking_ratio":   normalise(prev["staking_ratio"], RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
             "stablecoin_mcap": normalise(prev["stablecoin_mcap"], RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
+            "dex_volume":      normalise(prev["dex_ema"], RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
             "deepbook":        normalise(prev["deepbook_ema"], RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
             "mean_reversion":  zscore_to_score(prev["mean_reversion"] or 0.0),
             "sui_price":       normalise(prev["sui_price"], RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
@@ -698,6 +728,7 @@ def calculate_logos_index(data: dict, previous_index: float = None, prev_top_two
         "tvl":              normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
         "staking_ratio":    normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
         "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
+        "dex_volume":       normalise(data.get("dex_ema"), RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
         "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
         "mean_reversion":   zscore_to_score(z),
         "sui_price":        normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
@@ -719,6 +750,7 @@ def calculate_logos_index(data: dict, previous_index: float = None, prev_top_two
         if k == "tvl":              return f"TVL {fmt_large(data.get('tvl'))}"
         if k == "staking_ratio":    return f"staking {(data.get('staking_ratio') or 0)*100:.1f}%"
         if k == "stablecoin_mcap":  return f"stablecoin {fmt_large(data.get('stablecoin_mcap'))}"
+        if k == "dex_volume":       return f"DEX vol {fmt_large(data.get('dex_ema'))}"
         if k == "deepbook":         return f"DeepBook {fmt_large(data.get('deepbook_ema'))}"
         if k == "mean_reversion":   return f"mean rev {(data.get('mean_reversion') or 0):+.2f}σ"
         if k == "sui_price":        return f"SUI {fmt_price(data.get('sui_price'))}"
@@ -1085,9 +1117,11 @@ def run():
             data["dex_volume"] = last_dex
             log.warning(f"DEX volume fetch failed — using last known value: ${last_dex:,.0f}")
 
-    # Calculate 7-day EMA for DeepBook
+    # Calculate 7-day EMA for DeepBook and DEX volume
     data["deepbook_ema"] = calculate_deepbook_ema(data.get("deepbook_liquidity") or 0)
     log.info(f"DeepBook EMA (7d): {data['deepbook_ema']:,.0f}")
+    data["dex_ema"] = calculate_dex_ema(data.get("dex_volume") or 0)
+    log.info(f"DEX vol EMA (7d): {data['dex_ema']:,.0f}")
     data["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     # Mean reversion
