@@ -946,7 +946,7 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
     logos_teaser = f"{logos:.1f}/100" if logos is not None else "—"
 
     lines = [
-        "ARISTOTLE · SUI UPDATE",
+        "ARISTOTLE · SUI AGORA",
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         f"SUI        {fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
@@ -1017,7 +1017,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         dex_change_str = "+0.0% •"
 
     lines = [
-        "ARISTOTLE · SUI LOGOS",
+        "ARISTOTLE · SUI LYCEUM",
         f"{now.strftime('%d %b %Y')} · {session}",
         sep,
         "",
@@ -1034,7 +1034,9 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     driver = data.get("logos_driver", "")
     if driver:
         lines.append("")
-        for part in driver.split("\n\n"):
+        for i, part in enumerate(driver.split("\n\n")):
+            if i > 0:
+                lines.append("")
             lines.append(f"/ {part}")
 
     if commentary:
