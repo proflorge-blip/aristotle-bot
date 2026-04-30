@@ -1100,13 +1100,6 @@ def run():
             data["sui_price_change_24h"] = None
             log.warning(f"SUI price fetch failed — using last known: ${last_price:.4f}")
 
-    # If 24h change missing but price is known, calculate from DB (2 snapshots ≈ 24h)
-    if data.get("sui_price") and data.get("sui_price_change_24h") is None:
-        prev_price = get_price_24h_ago()
-        if prev_price and prev_price > 0:
-            data["sui_price_change_24h"] = ((data["sui_price"] - prev_price) / prev_price) * 100
-            log.info(f"Calculated SUI 24h change from DB: {data['sui_price_change_24h']:+.2f}%")
-
     # If DeepBook returned 0 or None, use last known good value from DB
     if not data.get("deepbook_liquidity"):
         last_db = get_previous_value("deepbook_liquidity")
@@ -1127,6 +1120,17 @@ def run():
     data["dex_ema"] = calculate_dex_ema(data.get("dex_volume") or 0)
     log.info(f"DEX vol EMA (7d): {data['dex_ema']:,.0f}")
     data["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Switch all changes to session-to-session (vs previous DB snapshot)
+    prev_sui = get_previous_value("sui_price")
+    if prev_sui and data.get("sui_price") and prev_sui > 0:
+        data["sui_price_change_24h"] = ((data["sui_price"] - prev_sui) / prev_sui) * 100
+        log.info(f"SUI session change: {data['sui_price_change_24h']:+.2f}%")
+
+    prev_tvl = get_previous_value("tvl")
+    if prev_tvl and data.get("tvl") and prev_tvl > 0:
+        data["tvl_change_24h"] = ((data["tvl"] - prev_tvl) / prev_tvl) * 100
+        log.info(f"TVL session change: {data['tvl_change_24h']:+.2f}%")
 
     # Mean reversion
     price_history = get_price_history(days=20)
