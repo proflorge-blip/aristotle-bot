@@ -925,7 +925,19 @@ def fmt_with_arrow(pct, **kwargs) -> str:
     return f"{fmt_pct(pct)} {arrow}".rstrip()
 
 
-def format_free_brief(data: dict, commentary: str = "") -> str:
+def mean_rev_interpretation(z: float) -> str:
+    if z < -1.0:
+        return f"Price more than 1σ below 20-day average ({z:+.2f}σ)."
+    if z < -0.5:
+        return f"Price moderately below 20-day average ({z:+.2f}σ)."
+    if z <= 0.5:
+        return f"Price tracking close to 20-day average ({z:+.2f}σ)."
+    if z <= 1.0:
+        return f"Price moderately above 20-day average ({z:+.2f}σ)."
+    return f"Price more than 1σ above 20-day average ({z:+.2f}σ)."
+
+
+(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
     sep = "─" * 24
@@ -1038,6 +1050,11 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
             if i > 0:
                 lines.append("")
             lines.append(f"/ {part}")
+
+    curr_mr = data.get("mean_reversion")
+    if curr_mr is not None:
+        lines.append("")
+        lines.append(f"/ {mean_rev_interpretation(curr_mr)}")
 
     if commentary:
         lines.append("")
