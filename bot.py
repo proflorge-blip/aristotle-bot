@@ -937,7 +937,7 @@ def mean_rev_interpretation(z: float) -> str:
     return f"Price more than 1σ above 20-day average ({z:+.2f}σ)."
 
 
-(data: dict, commentary: str = "") -> str:
+def format_free_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
     sep = "─" * 24
