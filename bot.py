@@ -878,6 +878,8 @@ def fmt_price(value):
 def fmt_pct(value):
     if value is None:
         return "—"
+    if round(value, 1) == 0.0:
+        return "+0.0%"
     return f"{'+' if value >= 0 else ''}{value:.1f}%"
 
 def fmt_large(value):
