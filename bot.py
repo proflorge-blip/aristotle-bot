@@ -937,6 +937,47 @@ def mean_rev_interpretation(z: float) -> str:
     return f"Price more than 1σ above 20-day average ({z:+.2f}σ)."
 
 
+def agora_logos_observation(logos: float, logos_delta, sui_change, tvl_change, dex_change) -> str:
+    if logos is None:
+        return ""
+    score_str = f"{logos:.1f}/100"
+
+    # Named driver — only SUI price, TVL, DEX VOL permitted; must be >= 5% and same direction as index
+    named_driver = None
+    if logos_delta is not None and abs(logos_delta) >= 0.5:
+        up = logos_delta > 0
+        candidates = []
+        if sui_change is not None and abs(sui_change) >= 5.0 and (sui_change > 0) == up:
+            candidates.append(("SUI price", sui_change))
+        if tvl_change is not None and abs(tvl_change) >= 5.0 and (tvl_change > 0) == up:
+            candidates.append(("TVL", tvl_change))
+        if dex_change is not None and abs(dex_change) >= 5.0 and (dex_change > 0) == up:
+            candidates.append(("DEX volume", dex_change))
+        if candidates:
+            top_name, top_chg = max(candidates, key=lambda x: abs(x[1]))
+            if top_name == "SUI price":
+                named_driver = "SUI price firmed, contributing to a modest improvement." if up else "SUI price softened, weighing on overall network health."
+            elif top_chg > 0:
+                named_driver = f"{top_name} expansion lifted overall network health."
+            else:
+                named_driver = f"{top_name} contraction weighed on the index."
+
+    if named_driver:
+        return f"Logos Index: {score_str} — {named_driver}"
+
+    delta = logos_delta or 0.0
+    if abs(delta) < 0.5:
+        return f"Logos Index: {score_str} — Network health showed little net change."
+    elif delta >= 3.0:
+        return f"Logos Index: {score_str} — Modest improvement in key fundamentals."
+    elif delta >= 0.5:
+        return f"Logos Index: {score_str} — Network health indicators firmed slightly."
+    elif delta <= -3.0:
+        return f"Logos Index: {score_str} — Mild softening in overall network metrics."
+    else:
+        return f"Logos Index: {score_str} — The Logos Index registered a modest decline to {logos:.1f}."
+
+
 def format_free_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
@@ -954,6 +995,19 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
     logos = data.get("logos_index")
     logos_str = f"{logos:.1f} / 100" if logos is not None else "—"
 
+    prev_logos = get_previous_value("logos_index")
+    logos_delta = (logos - prev_logos) if (logos is not None and prev_logos is not None) else None
+
+    prev_dex_val = get_previous_value("dex_volume")
+    dex_pct = ((curr_dex - prev_dex_val) / prev_dex_val * 100) if (prev_dex_val and curr_dex and prev_dex_val > 0) else None
+
+    observation = agora_logos_observation(
+        logos, logos_delta,
+        data.get("sui_price_change_24h"),
+        data.get("tvl_change_24h"),
+        dex_pct,
+    )
+
     lines = [
         "ARISTOTLE · AGORA UPDATE",
         f"{now.strftime('%a %d %b %Y')} · {session}",
@@ -965,8 +1019,12 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
         f"{'DEX VOL':<{L}}{fmt_large(curr_dex):<{V}}  {dex_change_str}",
         sep,
         f"LOGOS INDEX  {logos_str}",
+    ]
+    if observation:
+        lines.append(observation)
+    lines += [
         sep,
-        f"7 metrics + Logos Index Analysis → aristotle.report/subscribe",
+        "7 metrics + Logos Index Analysis → aristotle.report/subscribe",
     ]
     result = f"<pre>{chr(10).join(lines)}</pre>"
     if commentary:
