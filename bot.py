@@ -940,36 +940,34 @@ def mean_rev_interpretation(z: float) -> str:
 def format_free_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
     session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
-    sep = "─" * 24
-    V = 9
+    sep = "─" * 30
+    L = 11  # label column width
+    V = 9   # value column width
 
     prev_dex = get_previous_value("dex_volume")
     curr_dex = data.get("dex_volume")
     if prev_dex and curr_dex and prev_dex > 0:
         dex_change_str = fmt_with_arrow(((curr_dex - prev_dex) / prev_dex) * 100)
     else:
-        dex_change_str = "+0.00%"
+        dex_change_str = "+0.0% •"
 
-    show_logos = (
-        (now.weekday() == 0 and now.hour < 14) or
-        (now.weekday() == 4 and now.hour >= 14)
-    )
     logos = data.get("logos_index")
-    logos_teaser = f"{logos:.1f}/100" if logos is not None else "—"
+    logos_str = f"{logos:.1f} / 100" if logos is not None else "—"
 
     lines = [
-        "ARISTOTLE · SUI AGORA",
-        f"{now.strftime('%d %b %Y')} · {session}",
+        "ARISTOTLE · AGORA UPDATE",
+        f"{now.strftime('%a %d %b %Y')} · {session}",
         sep,
-        f"SUI        {fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
-        f"TVL        {fmt_large(data.get('tvl')):<{V}}  {fmt_with_arrow(data.get('tvl_change_24h'))}",
-        f"DEX VOL    {fmt_large(curr_dex):<{V}}  {dex_change_str}",
+        f"{'METRIC':<{L}}{'VALUE':<{V}}  24H ▲▼",
+        sep,
+        f"{'SUI':<{L}}{fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
+        f"{'TVL':<{L}}{fmt_large(data.get('tvl')):<{V}}  {fmt_with_arrow(data.get('tvl_change_24h'))}",
+        f"{'DEX VOL':<{L}}{fmt_large(curr_dex):<{V}}  {dex_change_str}",
+        sep,
+        f"LOGOS INDEX  {logos_str}",
+        sep,
+        f"7 metrics + Logos Index Analysis → aristotle.report/subscribe",
     ]
-    if show_logos:
-        lines.append(sep)
-        lines.append(f"LOGOS INDEX  {logos_teaser}")
-    lines.append(sep)
-    lines.append("@aristotlesuiupdate")
     result = f"<pre>{chr(10).join(lines)}</pre>"
     if commentary:
         result += f"\n\n{commentary}"
@@ -1001,16 +999,7 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
         mr_change_str = "+0.00"
 
     # Logos Index
-    prev_logos = get_previous_value("logos_index")
     curr_logos = data.get("logos_index")
-    logos_val = f"{curr_logos:.1f}/100" if curr_logos is not None else "—"
-    if prev_logos is not None and curr_logos is not None:
-        logos_delta = curr_logos - prev_logos
-        logos_arrow = get_arrow(logos_delta)
-        sign = "+" if logos_delta >= 0 else ""
-        logos_change_str = f"({sign}{logos_delta:.1f} {logos_arrow})"
-    else:
-        logos_change_str = "—"
 
     # Stablecoin mcap
     prev_sc = get_previous_value("stablecoin_mcap")
@@ -1028,24 +1017,28 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     else:
         dex_change_str = "+0.0% •"
 
+    logos_str = f"{curr_logos:.1f} / 100" if curr_logos is not None else "—"
+    L = 15  # label column width
+
     lines = [
-        "ARISTOTLE · SUI LYCEUM",
-        f"{now.strftime('%d %b %Y')} · {session}",
+        "ARISTOTLE · LYCEUM REPORT",
+        f"{now.strftime('%a %d %b %Y')} · {session}",
         sep,
-        "",
-        f"SUI            {fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
-        f"TVL            {fmt_large(data.get('tvl')):<{V}}  {fmt_with_arrow(data.get('tvl_change_24h'))}",
-        f"STABLECOIN     {fmt_large(curr_sc):<{V}}  {sc_change_str}",
-        f"DEX VOL        {fmt_large(curr_dex):<{V}}  {dex_change_str}",
-        f"DEEPBOOK       {fmt_large(curr_db):<{V}}  {db_change_str}",
-        f"MEAN REV       {mr_val:<{V}}  {mr_change_str}",
+        f"{'METRIC':<{L}}{'VALUE':<{V}}  24H ▲▼",
         sep,
-        f"LOGOS INDEX    {logos_val}  {logos_change_str}",
+        f"{'SUI':<{L}}{fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
+        f"{'TVL':<{L}}{fmt_large(data.get('tvl')):<{V}}  {fmt_with_arrow(data.get('tvl_change_24h'))}",
+        f"{'STABLECOIN':<{L}}{fmt_large(curr_sc):<{V}}  {sc_change_str}",
+        f"{'DEX VOL':<{L}}{fmt_large(curr_dex):<{V}}  {dex_change_str}",
+        f"{'DEEPBOOK':<{L}}{fmt_large(curr_db):<{V}}  {db_change_str}",
+        f"{'MEAN REV':<{L}}{mr_val:<{V}}  {mr_change_str}",
+        sep,
+        f"LOGOS INDEX    {logos_str}",
+        sep,
     ]
 
     driver = data.get("logos_driver", "")
     if driver:
-        lines.append("")
         for i, part in enumerate(driver.split("\n\n")):
             if i > 0:
                 lines.append("")
@@ -1059,6 +1052,9 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     if commentary:
         lines.append("")
         lines.append(commentary)
+
+    lines.append(sep)
+    lines.append(f"{'aristotle.report':>{len(sep)}}")
 
     return f"<pre>{chr(10).join(lines)}</pre>"
 
