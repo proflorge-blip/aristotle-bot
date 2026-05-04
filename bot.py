@@ -963,19 +963,19 @@ def agora_logos_observation(logos: float, logos_delta, sui_change, tvl_change, d
                 named_driver = f"{top_name} contraction weighed on the index."
 
     if named_driver:
-        return f"Logos Index: {score_str} — {named_driver}"
+        return named_driver
 
     delta = logos_delta or 0.0
     if abs(delta) < 0.5:
-        return f"Logos Index: {score_str} — Network health showed little net change."
+        return "Network health showed little net change."
     elif delta >= 3.0:
-        return f"Logos Index: {score_str} — Modest improvement in key fundamentals."
+        return "Modest improvement in key fundamentals."
     elif delta >= 0.5:
-        return f"Logos Index: {score_str} — Network health indicators firmed slightly."
+        return "Network health indicators firmed slightly."
     elif delta <= -3.0:
-        return f"Logos Index: {score_str} — Mild softening in overall network metrics."
+        return "Mild softening in overall network metrics."
     else:
-        return f"Logos Index: {score_str} — The Logos Index registered a modest decline to {logos:.1f}."
+        return f"The Logos Index registered a modest decline to {logos:.1f}."
 
 
 def format_free_brief(data: dict, commentary: str = "") -> str:
