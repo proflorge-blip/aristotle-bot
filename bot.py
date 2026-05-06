@@ -939,45 +939,72 @@ def mean_rev_interpretation(z: float) -> str:
     return f"Price more than 1σ above 20-day average ({z:+.2f}σ)."
 
 
+def _tension_phrase(a: str, b: str, ca: float, cb: float) -> str:
+    a_up = round(ca, 1) > 0
+    b_up = round(cb, 1) > 0
+    a_flat = round(ca, 1) == 0.0
+    b_flat = round(cb, 1) == 0.0
+
+    if a == "sui" and b == "tvl":
+        if a_up and not b_up:   return "Price firmed as capital withdrew."
+        if not a_up and b_up:   return "Capital held while price eased."
+        if a_up and b_flat:     return "Price firmed; capital unchanged."
+        if not a_up and b_flat: return "Price eased; capital unchanged."
+        if a_flat and b_up:     return "Capital deepened; price unchanged."
+        if a_flat and not b_up: return "Capital withdrew; price unchanged."
+        if a_up and b_up:       return "Price outpaced capital." if abs(ca) > abs(cb) else "Capital deepened ahead of price."
+        if not a_up and not b_up: return "Price fell faster than capital." if abs(ca) > abs(cb) else "Capital contracted more than price."
+
+    if a == "sui" and b == "dex":
+        if a_up and not b_up:   return "Price firmed while volume contracted."
+        if not a_up and b_up:   return "Volume expanded as price eased."
+        if a_up and b_flat:     return "Price firmed; volume flat."
+        if not a_up and b_flat: return "Price eased; volume flat."
+        if a_flat and b_up:     return "Volume expanded; price unchanged."
+        if a_flat and not b_up: return "Volume contracted; price unchanged."
+        if a_up and b_up:       return "Price moved ahead of volume." if abs(ca) > abs(cb) else "Volume outpaced price."
+        if not a_up and not b_up: return "Price fell faster than volume." if abs(ca) > abs(cb) else "Volume fell faster than price."
+
+    if a == "tvl" and b == "dex":
+        if a_up and not b_up:   return "Capital held while activity contracted."
+        if not a_up and b_up:   return "Activity picked up as capital eased."
+        if a_up and b_flat:     return "Capital deepened; activity flat."
+        if not a_up and b_flat: return "Capital withdrew; activity flat."
+        if a_flat and b_up:     return "Activity picked up; capital unchanged."
+        if a_flat and not b_up: return "Activity contracted; capital unchanged."
+        if a_up and b_up:       return "Capital expanded faster than activity." if abs(ca) > abs(cb) else "Activity picked up faster than capital."
+        if not a_up and not b_up: return "Capital contracted more than activity." if abs(ca) > abs(cb) else "Activity fell faster than capital."
+
+    return "Metrics broadly steady."
+
+
 def agora_logos_observation(logos: float, logos_delta, sui_change, tvl_change, dex_change) -> str:
-    if logos is None:
-        return ""
-    score_str = f"{logos:.1f}/100"
+    avail = {}
+    if sui_change is not None: avail["sui"] = sui_change
+    if tvl_change is not None: avail["tvl"] = tvl_change
+    if dex_change is not None: avail["dex"] = dex_change
 
-    # Named driver — only SUI price, TVL, DEX VOL permitted; must be >= 5% and same direction as index
-    named_driver = None
-    if logos_delta is not None and abs(logos_delta) >= 0.5:
-        up = logos_delta > 0
-        candidates = []
-        if sui_change is not None and abs(sui_change) >= 5.0 and (sui_change > 0) == up:
-            candidates.append(("SUI price", sui_change))
-        if tvl_change is not None and abs(tvl_change) >= 5.0 and (tvl_change > 0) == up:
-            candidates.append(("TVL", tvl_change))
-        if dex_change is not None and abs(dex_change) >= 5.0 and (dex_change > 0) == up:
-            candidates.append(("DEX volume", dex_change))
-        if candidates:
-            top_name, top_chg = max(candidates, key=lambda x: abs(x[1]))
-            if top_name == "SUI price":
-                named_driver = "SUI price firmed, contributing to a modest improvement." if up else "SUI price softened, weighing on overall network health."
-            elif top_chg > 0:
-                named_driver = f"{top_name} expansion lifted overall network health."
-            else:
-                named_driver = f"{top_name} contraction weighed on the index."
+    if len(avail) < 2:
+        return "Metrics broadly steady."
 
-    if named_driver:
-        return named_driver
+    # Score each pair — opposite directions weighted higher than magnitude divergence
+    pairs = [("sui", "tvl"), ("sui", "dex"), ("tvl", "dex")]
+    best_pair, best_score = None, -1
+    for a, b in pairs:
+        if a not in avail or b not in avail:
+            continue
+        ca, cb = avail[a], avail[b]
+        if (round(ca, 1) > 0) != (round(cb, 1) > 0):
+            score = abs(ca) + abs(cb)           # opposite directions
+        else:
+            score = abs(ca - cb) * 0.6          # same direction, divergent magnitude
+        if score > best_score:
+            best_score, best_pair = score, (a, b, ca, cb)
 
-    delta = logos_delta or 0.0
-    if abs(delta) < 0.5:
-        return "Network health showed little net change."
-    elif delta >= 3.0:
-        return "Modest improvement in key fundamentals."
-    elif delta >= 0.5:
-        return "Network health indicators firmed slightly."
-    elif delta <= -3.0:
-        return "Mild softening in overall network metrics."
-    else:
-        return f"The Logos Index registered a modest decline to {logos:.1f}."
+    if best_pair is None or best_score < 0.2:
+        return "Metrics broadly steady."
+
+    return _tension_phrase(*best_pair)
 
 
 def format_free_brief(data: dict, commentary: str = "") -> str:
