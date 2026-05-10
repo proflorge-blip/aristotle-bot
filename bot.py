@@ -6,13 +6,13 @@ v3: Final formatting, locked metrics, arrows on Logos Index
 """
 
 import os
+import hashlib
 import requests
-import sqlite3
+import psycopg2
 import logging
 import time
 from datetime import datetime, timezone
 from statistics import mean, stdev
-import anthropic
 
 # ─────────────────────────────────────────
 # CONFIGURATION
@@ -23,7 +23,8 @@ FREE_CHANNEL_ID    = os.environ.get("FREE_CHANNEL_ID")
 PAID_CHANNEL_ID    = os.environ.get("PAID_CHANNEL_ID")
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 
-DB_PATH = "aristotle.db"
+_raw_db_url = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = _raw_db_url.replace("postgres://", "postgresql://", 1)
 
 STABLECOINS = {"USDC", "USDT", "USDE", "DAI", "BUCK", "SUIUSD", "AUSD", "FDUSD"}
 
@@ -50,66 +51,83 @@ log = logging.getLogger("aristotle")
 # DATABASE
 # ─────────────────────────────────────────
 
+def get_db_conn():
+    return psycopg2.connect(DATABASE_URL)
+
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS snapshots_v3 (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             timestamp TEXT NOT NULL,
-            sui_price REAL,
-            sui_price_change_24h REAL,
-            dex_volume REAL,
-            tvl REAL,
-            tvl_change_24h REAL,
-            active_addresses INTEGER,
-            deepbook_liquidity REAL,
-            deepbook_ema REAL,
-            deepbook_change REAL,
-            staking_ratio REAL,
-            tx_count_total INTEGER,
-            mean_reversion REAL,
-            mean_reversion_prev REAL,
-            logos_index REAL,
+            sui_price DOUBLE PRECISION,
+            sui_price_change_24h DOUBLE PRECISION,
+            dex_volume DOUBLE PRECISION,
+            tvl DOUBLE PRECISION,
+            tvl_change_24h DOUBLE PRECISION,
+            active_addresses BIGINT,
+            deepbook_liquidity DOUBLE PRECISION,
+            deepbook_ema DOUBLE PRECISION,
+            deepbook_change DOUBLE PRECISION,
+            staking_ratio DOUBLE PRECISION,
+            stablecoin_mcap DOUBLE PRECISION,
+            tx_count_total BIGINT,
+            mean_reversion DOUBLE PRECISION,
+            mean_reversion_prev DOUBLE PRECISION,
+            logos_index DOUBLE PRECISION,
             best_token_symbol TEXT,
-            best_token_change REAL
+            best_token_change DOUBLE PRECISION
         )
     """)
+    # Ensure existing table has BIGINT for large counters
+    c.execute("ALTER TABLE snapshots_v3 ALTER COLUMN tx_count_total TYPE BIGINT")
+    c.execute("ALTER TABLE snapshots_v3 ALTER COLUMN active_addresses TYPE BIGINT")
+    # Add dex_ema column if not already present
+    c.execute("ALTER TABLE snapshots_v3 ADD COLUMN IF NOT EXISTS dex_ema DOUBLE PRECISION")
     conn.commit()
     conn.close()
     log.info("Database ready.")
 
 def save_snapshot(data: dict):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO snapshots_v3 (
-            timestamp, sui_price, sui_price_change_24h, dex_volume,
-            tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
-            deepbook_ema, deepbook_change, staking_ratio, tx_count_total,
-            mean_reversion, mean_reversion_prev, logos_index, best_token_symbol, best_token_change
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        data.get("timestamp"),
-        data.get("sui_price"),
-        data.get("sui_price_change_24h"),
-        data.get("dex_volume"),
-        data.get("tvl"),
-        data.get("tvl_change_24h"),
-        data.get("active_addresses"),
-        data.get("deepbook_liquidity"),
-        data.get("deepbook_ema"),
-        data.get("deepbook_change"),
-        data.get("staking_ratio"),
-        data.get("tx_count_total"),
-        data.get("mean_reversion"),
-        data.get("mean_reversion_prev"),
-        data.get("logos_index"),
-        data.get("best_token_symbol"),
-        data.get("best_token_change"),
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO snapshots_v3 (
+                timestamp, sui_price, sui_price_change_24h, dex_volume,
+                tvl, tvl_change_24h, active_addresses, deepbook_liquidity,
+                deepbook_ema, deepbook_change, staking_ratio, stablecoin_mcap,
+                tx_count_total, mean_reversion, mean_reversion_prev, logos_index,
+                best_token_symbol, best_token_change, dex_ema
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            data.get("timestamp"),
+            data.get("sui_price"),
+            data.get("sui_price_change_24h"),
+            data.get("dex_volume"),
+            data.get("tvl"),
+            data.get("tvl_change_24h"),
+            data.get("active_addresses"),
+            data.get("deepbook_liquidity"),
+            data.get("deepbook_ema"),
+            data.get("deepbook_change"),
+            data.get("staking_ratio"),
+            data.get("stablecoin_mcap"),
+            data.get("tx_count_total"),
+            data.get("mean_reversion"),
+            data.get("mean_reversion_prev"),
+            data.get("logos_index"),
+            data.get("best_token_symbol"),
+            data.get("best_token_change"),
+            data.get("dex_ema"),
+        ))
+        conn.commit()
+        conn.close()
+        log.info("Snapshot saved to database.")
+    except Exception as e:
+        log.error(f"save_snapshot FAILED — changes will not persist: {e}")
 
 def seed_price_history():
     """Seed DB with 20 days of historical SUI prices from CoinGecko if not enough history."""
@@ -126,12 +144,12 @@ def seed_price_history():
         )
         r.raise_for_status()
         prices = r.json().get("prices", [])
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
         for ts_ms, price in prices[:-1]:  # exclude today — bot will insert current
             ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
             c.execute(
-                "INSERT INTO snapshots_v3 (timestamp, sui_price) VALUES (?, ?)",
+                "INSERT INTO snapshots_v3 (timestamp, sui_price) VALUES (%s, %s)",
                 (ts, round(price, 6))
             )
         conn.commit()
@@ -143,18 +161,35 @@ def seed_price_history():
 
 def get_price_history(days: int = 20) -> list:
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
-        c.execute("SELECT sui_price FROM snapshots_v3 ORDER BY id DESC LIMIT ?", (days,))
+        c.execute("SELECT sui_price FROM snapshots_v3 ORDER BY id DESC LIMIT %s", (days,))
         rows = c.fetchall()
         conn.close()
         return [r[0] for r in rows if r[0] is not None]
     except Exception:
         return []
 
+def get_price_24h_ago() -> float:
+    """Return SUI price from ~24h ago (2 snapshots back) for fallback change calculation."""
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute("SELECT sui_price FROM snapshots_v3 WHERE sui_price IS NOT NULL ORDER BY id DESC LIMIT 3")
+        rows = c.fetchall()
+        conn.close()
+        prices = [r[0] for r in rows if r[0] is not None]
+        if len(prices) >= 3:
+            return prices[2]
+        if len(prices) >= 2:
+            return prices[1]
+        return None
+    except Exception:
+        return None
+
 def get_previous_value(column: str):
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
         c.execute(f"SELECT {column} FROM snapshots_v3 ORDER BY id DESC LIMIT 1")
         row = c.fetchone()
@@ -162,6 +197,36 @@ def get_previous_value(column: str):
         return row[0] if row else None
     except Exception:
         return None
+
+def get_value_24h_ago(column: str):
+    """Return the value from the snapshot closest to 24 hours ago."""
+    try:
+        from datetime import timedelta
+        conn = get_db_conn()
+        c = conn.cursor()
+        target = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        c.execute(
+            f"SELECT {column} FROM snapshots_v3 WHERE timestamp <= %s ORDER BY timestamp DESC LIMIT 1",
+            (target,)
+        )
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+def get_previous_values(*columns) -> dict:
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute(f"SELECT {', '.join(columns)} FROM snapshots_v3 ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return {col: None for col in columns}
+        return dict(zip(columns, row))
+    except Exception:
+        return {col: None for col in columns}
 
 # ─────────────────────────────────────────
 # DATA FETCHERS
@@ -524,9 +589,9 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
     Smooths intraday spikes.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_conn()
         c = conn.cursor()
-        c.execute("SELECT deepbook_liquidity FROM snapshots_v3 ORDER BY id DESC LIMIT ?", (days * 2,))
+        c.execute("SELECT deepbook_liquidity FROM snapshots_v3 ORDER BY id DESC LIMIT %s", (days * 2,))
         rows = c.fetchall()
         conn.close()
         values = [r[0] for r in rows if r[0] is not None and r[0] > 0]
@@ -546,26 +611,98 @@ def calculate_deepbook_ema(current_value: float, days: int = 7) -> float:
     return round(ema, 2)
 
 
+def calculate_dex_ema(current_value: float, days: int = 7) -> float:
+    """Calculate 7-day EMA of DEX volume from DB snapshots. Smooths daily spikes."""
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        c.execute("SELECT dex_volume FROM snapshots_v3 ORDER BY id DESC LIMIT %s", (days * 2,))
+        rows = c.fetchall()
+        conn.close()
+        values = [r[0] for r in rows if r[0] is not None and r[0] > 0]
+    except Exception:
+        values = []
+
+    if not values:
+        return current_value or 0
+
+    k = 2 / (days + 1)
+    ema = values[-1]
+    for v in reversed(values[:-1]):
+        ema = v * k + ema * (1 - k)
+    ema = current_value * k + ema * (1 - k)
+    return round(ema, 2)
+
+
 # ─────────────────────────────────────────
 # LOGOS INDEX
 # ─────────────────────────────────────────
 
 WEIGHTS = {
     "tvl":              0.30,  # primary ecosystem health signal
-    "staking_ratio":    0.22,  # long-run commitment signal
     "stablecoin_mcap":  0.20,  # real economic demand on-chain
-    "deepbook":         0.15,  # SUI/USDC liquidity depth
-    "mean_reversion":   0.13,  # contrarian flag
+    "dex_volume":       0.13,  # active economic throughput (7d EMA)
+    "sui_price":        0.13,  # price level as sentiment signal
+    "deepbook":         0.12,  # SUI/USDC liquidity depth
+    "mean_reversion":   0.12,  # contrarian flag — conditionally reduced in trends
+}
+
+FACTOR_LABELS = {
+    "tvl":              "capital depth",
+    "stablecoin_mcap":  "stablecoin demand",
+    "dex_volume":       "DEX volume",
+    "deepbook":         "liquidity depth",
+    "mean_reversion":   "mean reversion",
+    "sui_price":        "SUI price",
 }
 
 RANGES = {
     "tvl":              {"min": 200_000_000,   "max": 800_000_000},
-    "staking_ratio":    {"min": 0.40,          "max": 0.80},
     "stablecoin_mcap":  {"min": 100_000_000,   "max": 1_100_000_000},
-    "deepbook":         {"min": 0,             "max": 25_000_000},
+    "dex_volume":       {"min": 10_000_000,    "max": 150_000_000},
+    "deepbook":         {"min": 0,             "max": 50_000_000},
+    "sui_price":        {"min": 0.50,          "max": 2.50},
 }
 
 DAMPENING_CAP = 10.0
+
+ANCHOR_TEMPLATES = [
+    "{a} and {b} are anchoring the score.",
+    "The score is underpinned by {a} and {b}.",
+    "{a} and {b} hold the index in place.",
+    "With {a} and {b} elevated, the score holds firm.",
+    "{a} leads the index, supported by {b}.",
+]
+
+ANCHOR_SAME_TEMPLATES = [
+    "The leading factors are unchanged — {a} and {b} continue to hold.",
+    "{a} and {b} dominate again this session.",
+    "No rotation in the top factors — {a} and {b} hold position.",
+    "{a} and {b} remain the dominant contributors.",
+]
+
+
+def _get_prev_top_two() -> list:
+    """Return the two highest-contributing factor keys from the previous snapshot."""
+    try:
+        prev = get_previous_values(
+            "sui_price", "tvl", "stablecoin_mcap",
+            "deepbook_ema", "mean_reversion", "dex_ema"
+        )
+        if all(v is None for v in prev.values()):
+            return []
+        scores = {
+            "tvl":             normalise(prev["tvl"], RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
+            "stablecoin_mcap": normalise(prev["stablecoin_mcap"], RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
+            "dex_volume":      normalise(prev["dex_ema"], RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
+            "deepbook":        normalise(prev["deepbook_ema"], RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
+            "mean_reversion":  zscore_to_score(prev["mean_reversion"] or 0.0),
+            "sui_price":       normalise(prev["sui_price"], RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
+        }
+        contributions = {k: scores[k] * WEIGHTS[k] for k in WEIGHTS}
+        return [k for k, _ in sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:2]]
+    except Exception:
+        return []
 
 
 def normalise(value, min_val, max_val) -> float:
@@ -587,20 +724,97 @@ def zscore_to_score(z: float) -> float:
     return max(0, min(100, 50 - (z * 10)))
 
 
-def calculate_logos_index(data: dict, previous_index: float = None) -> float:
+def calculate_logos_index(data: dict, previous_index: float = None, prev_top_two: list = None) -> dict:
+    z = data.get("mean_reversion", 0.0) or 0.0
+
+    # Conditional mean reversion: halve MR weight when |z| > 1 (trend-fading)
+    weights = dict(WEIGHTS)
+    if abs(z) > 1.0:
+        freed = weights["mean_reversion"] * 0.5
+        weights["mean_reversion"] -= freed
+        other_keys = [k for k in weights if k != "mean_reversion"]
+        total_others = sum(weights[k] for k in other_keys)
+        for k in other_keys:
+            weights[k] += freed * (weights[k] / total_others)
+
     scores = {
-        "tvl":              normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
-        "staking_ratio":    normalise(data.get("staking_ratio"), RANGES["staking_ratio"]["min"], RANGES["staking_ratio"]["max"]),
-        "stablecoin_mcap":  normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
-        "deepbook":         normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
-        "mean_reversion":   zscore_to_score(data.get("mean_reversion", 0.0) or 0.0),
+        "tvl":             normalise(data.get("tvl"), RANGES["tvl"]["min"], RANGES["tvl"]["max"]),
+        "stablecoin_mcap": normalise(data.get("stablecoin_mcap"), RANGES["stablecoin_mcap"]["min"], RANGES["stablecoin_mcap"]["max"]),
+        "dex_volume":      normalise(data.get("dex_ema"), RANGES["dex_volume"]["min"], RANGES["dex_volume"]["max"]),
+        "deepbook":        normalise(data.get("deepbook_ema"), RANGES["deepbook"]["min"], RANGES["deepbook"]["max"]),
+        "mean_reversion":  zscore_to_score(z),
+        "sui_price":       normalise(data.get("sui_price"), RANGES["sui_price"]["min"], RANGES["sui_price"]["max"]),
     }
-    raw = max(1, min(100, sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)))
+
+    contributions = {k: scores[k] * weights[k] for k in weights}
+    raw = max(1, min(100, sum(contributions.values())))
+
     if previous_index is not None:
         delta = raw - previous_index
         if abs(delta) > DAMPENING_CAP:
             raw = previous_index + (DAMPENING_CAP if delta > 0 else -DAMPENING_CAP)
-    return round(raw, 1)
+
+    raw = round(raw, 1)
+    top_two  = sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:2]
+    lagging  = min(contributions, key=contributions.get)
+
+    def _fmt_factor(k):
+        if k == "tvl":             return f"TVL {fmt_large(data.get('tvl'))}"
+        if k == "stablecoin_mcap": return f"stablecoin {fmt_large(data.get('stablecoin_mcap'))}"
+        if k == "dex_volume":      return f"DEX vol {fmt_large(data.get('dex_ema'))}"
+        if k == "deepbook":        return f"DeepBook {fmt_large(data.get('deepbook_ema'))}"
+        if k == "mean_reversion":  return f"mean rev {(data.get('mean_reversion') or 0):+.2f}σ"
+        if k == "sui_price":       return f"SUI {fmt_price(data.get('sui_price'))}"
+        return k
+
+    current_top_keys = [k for k, _ in top_two]
+    a_fmt = _fmt_factor(current_top_keys[0])
+    b_fmt = _fmt_factor(current_top_keys[1])
+
+    try:
+        dt = datetime.fromisoformat(data.get("timestamp") or "")
+        slot = dt.timetuple().tm_yday * 2 + (1 if dt.hour >= 14 else 0)
+    except Exception:
+        slot = int(hashlib.md5((data.get("timestamp") or "").encode()).hexdigest()[:6], 16)
+    if prev_top_two and set(current_top_keys) == set(prev_top_two):
+        tmpl = ANCHOR_SAME_TEMPLATES[slot % len(ANCHOR_SAME_TEMPLATES)]
+    else:
+        tmpl = ANCHOR_TEMPLATES[slot % len(ANCHOR_TEMPLATES)]
+
+    line1_raw = tmpl.format(a=a_fmt, b=b_fmt)
+    line1 = f"{line1_raw[0].upper()}{line1_raw[1:]}"
+
+    # Line 2: reference what moved most negatively this session
+    session_changes = {}
+    if data.get("tvl_change_24h") is not None:
+        session_changes["TVL"] = data["tvl_change_24h"]
+    if data.get("sui_price_change_24h") is not None:
+        session_changes["SUI price"] = data["sui_price_change_24h"]
+
+    worst_name = min(session_changes, key=session_changes.get) if session_changes else None
+    worst_pct  = session_changes[worst_name] if worst_name else None
+
+    if worst_name and worst_pct is not None and worst_pct < -2:
+        if previous_index is not None:
+            index_delta = raw - previous_index
+            if index_delta < -0.5:
+                line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is the primary drag, softening the index {abs(index_delta):.1f} points."
+            elif index_delta > 0.5:
+                line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is offset by other factors, with the index firming {abs(index_delta):.1f} points."
+            else:
+                line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is the primary drag this session, though the index held broadly steady."
+        else:
+            line2 = f"{worst_name}'s {fmt_pct(worst_pct)} fall is the primary drag this session."
+    else:
+        price_change = data.get("sui_price_change_24h") or 0
+        if lagging == "sui_price" and abs(price_change) >= 3:
+            line2 = f"SUI is down {fmt_pct(price_change)} and the weakest contributor; however, it's weighted at 10% so the drag on the overall score remains limited."
+        else:
+            line2 = f"{FACTOR_LABELS[lagging].capitalize()} is the weakest contributor this session."
+
+    driver_line = f"{line1}\n\n{line2}"
+
+    return {"score": raw, "contributions": contributions, "driver_line": driver_line}
 
 
 # ─────────────────────────────────────────
@@ -608,22 +822,35 @@ def calculate_logos_index(data: dict, previous_index: float = None) -> float:
 # ─────────────────────────────────────────
 
 ARISTOTLE_SYSTEM_PROMPT = """
-You are Aristotle — a calm, precise Sui blockchain intelligence service.
+You are Aristotle — a Sui blockchain data service. Mechanical clarity with philosophical tone.
 
 Voice rules:
 - Observational, never predictive
-- Quiet optimism, never hype
 - Never use: bullish, bearish, moon, dump, pumping, soaring, plunging
 - Never say "I" or refer to yourself
 - One sentence only
-- Data is the authority, not opinion
+- No vague macro terms (ecosystem, market conditions, environment) unless grounded in a specific number
+- No standalone sentences — always contrast or connect exactly two metrics
+- No questions — they introduce prediction pressure
+- Zero opinion — the data speaks, you report
 
-Examples of good closing lines:
-"A quiet session — staking holds firm while price and volume pull back modestly toward equilibrium."
-"The ecosystem is absorbing the week's volatility without structural disruption."
-"Liquidity remains present; the question is whether volume follows."
-"A score of 57 reflects measured activity — no metric distressed, none elevated."
-"Staking continues to hold. That is the signal that matters most today."
+Metric anchoring (mandatory):
+- Every metric reference must include its value: "staking at 75.6%" not "staking holds"
+- Every change reference must include magnitude: "DEX volume down 16%" not "volume fell"
+
+Contrast requirement (mandatory):
+- The sentence must hold two signals in tension: one that rose or held, one that fell or diverged
+
+Pre-publish checklist — reject the sentence if:
+- It could apply to 10 different days without changing a word
+- It references fewer than 2 named metrics with values
+- It contains an opinion, forecast, or implied recommendation
+
+Examples:
+"Staking steady at 75.6% while DEX volume dropped 16% to $59M — commitment holds as trading activity contracts."
+"TVL at $585M unchanged while DeepBook EMA fell to $12M — capital is present but liquidity depth is thinning."
+"Price +5.5% to $0.98 against a mean reversion of +0.93σ — price has moved ahead of its 20-day average."
+"Logos Index 54.1 with staking at 75.7% and DEX volume at $59M — index is held down by weak volume, not by commitment."
 """
 
 
@@ -631,6 +858,7 @@ def generate_closing_line(data: dict) -> str:
     """Sends brief data to Claude, returns one closing line.
     Falls back to empty string if API call fails."""
     try:
+        import anthropic
         tvl_b   = (data.get("tvl") or 0) / 1_000_000_000
         dex_m   = (data.get("dex_volume") or 0) / 1_000_000
         staking = (data.get("staking_ratio") or 0) * 100
@@ -667,6 +895,8 @@ def fmt_price(value):
 def fmt_pct(value):
     if value is None:
         return "—"
+    if round(value, 1) == 0.0:
+        return "+0.0%"
     return f"{'+' if value >= 0 else ''}{value:.1f}%"
 
 def fmt_large(value):
@@ -694,129 +924,242 @@ def fmt_change(value):
     return f"{'+' if value >= 0 else ''}{value:.2f}"
 
 def get_arrow(change_pct: float, minor_threshold: float = 2.0, major_threshold: float = 5.0) -> str:
+    if change_pct is None:
+        return "—"
+    if round(change_pct, 1) == 0.0:
+        return "•"
     if change_pct >= major_threshold:
         return "▲"
-    elif change_pct >= minor_threshold:
+    elif change_pct >= 0:
         return "△"
-    elif change_pct <= -major_threshold:
-        return "▼"
-    elif change_pct <= -minor_threshold:
+    elif change_pct > -major_threshold:
         return "▽"
     else:
+        return "▼"
+
+def fmt_with_arrow(pct, **kwargs) -> str:
+    if pct is None:
         return "—"
+    arrow = get_arrow(pct, **kwargs)
+    return f"{fmt_pct(pct)} {arrow}".rstrip()
+
+
+def mean_rev_interpretation(z: float) -> str:
+    if z < -1.0:
+        return f"Price more than 1σ below 20-day average ({z:+.2f}σ)."
+    if z < -0.5:
+        return f"Price moderately below 20-day average ({z:+.2f}σ)."
+    if z <= 0.5:
+        return f"Price tracking close to 20-day average ({z:+.2f}σ)."
+    if z <= 1.0:
+        return f"Price moderately above 20-day average ({z:+.2f}σ)."
+    return f"Price more than 1σ above 20-day average ({z:+.2f}σ)."
+
+
+def _tension_phrase(a: str, b: str, ca: float, cb: float) -> str:
+    a_up = round(ca, 1) > 0
+    b_up = round(cb, 1) > 0
+    a_flat = round(ca, 1) == 0.0
+    b_flat = round(cb, 1) == 0.0
+
+    if a == "sui" and b == "tvl":
+        if a_up and not b_up:   return "Price firmed as capital withdrew."
+        if not a_up and b_up:   return "Capital held while price eased."
+        if a_up and b_flat:     return "Price firmed; capital unchanged."
+        if not a_up and b_flat: return "Price eased; capital unchanged."
+        if a_flat and b_up:     return "Capital deepened; price unchanged."
+        if a_flat and not b_up: return "Capital withdrew; price unchanged."
+        if a_up and b_up:       return "Price outpaced capital." if abs(ca) > abs(cb) else "Capital deepened ahead of price."
+        if not a_up and not b_up: return "Price fell faster than capital." if abs(ca) > abs(cb) else "Capital contracted more than price."
+
+    if a == "sui" and b == "dex":
+        if a_up and not b_up:   return "Price firmed while volume contracted."
+        if not a_up and b_up:   return "Volume expanded as price eased."
+        if a_up and b_flat:     return "Price firmed; volume flat."
+        if not a_up and b_flat: return "Price eased; volume flat."
+        if a_flat and b_up:     return "Volume expanded; price unchanged."
+        if a_flat and not b_up: return "Volume contracted; price unchanged."
+        if a_up and b_up:       return "Price moved ahead of volume." if abs(ca) > abs(cb) else "Volume outpaced price."
+        if not a_up and not b_up: return "Price fell faster than volume." if abs(ca) > abs(cb) else "Volume fell faster than price."
+
+    if a == "tvl" and b == "dex":
+        if a_up and not b_up:   return "Capital held while activity contracted."
+        if not a_up and b_up:   return "Activity picked up as capital eased."
+        if a_up and b_flat:     return "Capital deepened; activity flat."
+        if not a_up and b_flat: return "Capital withdrew; activity flat."
+        if a_flat and b_up:     return "Activity picked up; capital unchanged."
+        if a_flat and not b_up: return "Activity contracted; capital unchanged."
+        if a_up and b_up:       return "Capital expanded faster than activity." if abs(ca) > abs(cb) else "Activity picked up faster than capital."
+        if not a_up and not b_up: return "Capital contracted more than activity." if abs(ca) > abs(cb) else "Activity fell faster than capital."
+
+    return "Metrics broadly steady."
+
+
+def agora_logos_observation(logos: float, logos_delta, sui_change, tvl_change, dex_change) -> str:
+    avail = {}
+    if sui_change is not None: avail["sui"] = sui_change
+    if tvl_change is not None: avail["tvl"] = tvl_change
+    if dex_change is not None: avail["dex"] = dex_change
+
+    if len(avail) < 2:
+        return "Metrics broadly steady."
+
+    # Score each pair — opposite directions weighted higher than magnitude divergence
+    pairs = [("sui", "tvl"), ("sui", "dex"), ("tvl", "dex")]
+    best_pair, best_score = None, -1
+    for a, b in pairs:
+        if a not in avail or b not in avail:
+            continue
+        ca, cb = avail[a], avail[b]
+        if (round(ca, 1) > 0) != (round(cb, 1) > 0):
+            score = abs(ca) + abs(cb)           # opposite directions
+        else:
+            score = abs(ca - cb) * 0.6          # same direction, divergent magnitude
+        if score > best_score:
+            best_score, best_pair = score, (a, b, ca, cb)
+
+    if best_pair is None or best_score < 0.2:
+        return "Metrics broadly steady."
+
+    return _tension_phrase(*best_pair)
 
 
 def format_free_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
-    sep = "─" * 24
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
+    sep = "─" * 30
+    L = 11  # label column width
+    V = 9   # value column width
 
-    leader_str = "—"
-    if data.get("best_token_symbol") and data.get("best_token_change") is not None:
-        leader_str = f"{data['best_token_symbol']} {fmt_pct(data['best_token_change'])}"
-
-    # DEX VOL with change vs previous snapshot
-    prev_dex = get_previous_value("dex_volume")
+    prev_dex = get_value_24h_ago("dex_volume")
     curr_dex = data.get("dex_volume")
-    dex_str = fmt_large(curr_dex)
     if prev_dex and curr_dex and prev_dex > 0:
-        dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
-        dex_str += f"   {fmt_pct(dex_change)}"
+        dex_change_str = fmt_with_arrow(((curr_dex - prev_dex) / prev_dex) * 100)
     else:
-        dex_str += "   —"
+        dex_change_str = "+0.0% •"
 
-    # Show Logos Index teaser on Monday 07:00 and Friday 21:00
-    show_logos = (
-        (now.weekday() == 0 and now.hour < 14) or   # Monday morning
-        (now.weekday() == 4 and now.hour >= 14)       # Friday evening
-    )
     logos = data.get("logos_index")
-    logos_teaser = f"{logos:.1f}/100" if logos is not None else "—"
+    logos_str = f"{logos:.1f} / 100" if logos is not None else "—"
+
+    prev_logos = get_previous_value("logos_index")
+    logos_delta = (logos - prev_logos) if (logos is not None and prev_logos is not None) else None
+
+    dex_pct = ((curr_dex - prev_dex) / prev_dex * 100) if (prev_dex and curr_dex and prev_dex > 0) else None
+
+    observation = agora_logos_observation(
+        logos, logos_delta,
+        data.get("sui_price_change_24h"),
+        data.get("tvl_change_24h"),
+        dex_pct,
+    )
 
     lines = [
-        "ARISTOTLE · SUI UPDATE",
-        f"{now.strftime('%d %b %Y')} · {session}",
+        "ARISTOTLE · AGORA UPDATE",
+        f"{now.strftime('%a %d %b %Y')} · {session}",
         sep,
-        f"SUI        {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h') or 0)}",
-        f"TVL        {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h') or 0)}",
-        f"DEX VOL    {dex_str}",
+        f"{'METRIC':<{L}}{'VALUE':<{V}}  24H ▲▼",
+        sep,
+        f"{'SUI':<{L}}{fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
+        f"{'TVL':<{L}}{fmt_large(data.get('tvl')):<{V}}  {fmt_with_arrow(data.get('tvl_change_24h'))}",
+        f"{'DEX VOL':<{L}}{fmt_large(curr_dex):<{V}}  {dex_change_str}",
+        sep,
+        f"LOGOS INDEX  {logos_str}",
     ]
-    if show_logos:
-        lines.append(sep)
-        lines.append(f"LOGOS INDEX  {logos_teaser}")
-    lines.append(sep)
-    lines.append("@aristotlesuiupdate")
+    if observation:
+        lines.append(observation)
+    lines += [
+        sep,
+        "7 metrics + Logos Index Analysis → aristotle.report/subscribe",
+    ]
+    result = f"<pre>{chr(10).join(lines)}</pre>"
     if commentary:
-        lines.append("")
-        lines.append(commentary)
-    return "\n".join(lines)
+        result += f"\n\n{commentary}"
+    return result
 
 
 def format_paid_brief(data: dict, commentary: str = "") -> str:
     now = datetime.now(timezone.utc)
-    session = "7h UTC · MORNING" if now.hour < 14 else "19h UTC · EVENING"
+    session = "07:00 UTC · MORNING" if now.hour < 14 else "19:00 UTC · EVENING"
     sep = "─" * 26
+    V = 9  # value column width
 
-    # DeepBook with change
-    prev_db = get_previous_value("deepbook_liquidity")
+    # DeepBook — compare to 24h ago (daily rolling figure)
+    prev_db = get_value_24h_ago("deepbook_liquidity")
     curr_db = data.get("deepbook_liquidity")
-    db_str = fmt_large(curr_db)
     if prev_db and curr_db and prev_db > 0:
-        db_change = ((curr_db - prev_db) / prev_db) * 100
-        db_str += f"    {fmt_pct(db_change)} {get_arrow(db_change)}"
+        db_change_str = fmt_with_arrow(((curr_db - prev_db) / prev_db) * 100)
     else:
-        db_str += "    —"
+        db_change_str = "+0.0% •"
 
-    # Mean reversion with change vs previous
+    # Mean reversion — compare to previous session (tracks momentum shift)
     prev_mr = get_previous_value("mean_reversion")
     curr_mr = data.get("mean_reversion")
-    mr_str = f"{curr_mr:+.2f}σ" if curr_mr is not None else "—"
+    mr_val = f"{curr_mr:+.2f}σ" if curr_mr is not None else "—"
     if prev_mr is not None and curr_mr is not None:
         mr_change = curr_mr - prev_mr
-        mr_str += f"    {fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
+        mr_change_str = f"{fmt_change(mr_change)} {get_arrow(mr_change, minor_threshold=0.3, major_threshold=1.0)}"
     else:
-        mr_str += "     —"
+        mr_change_str = "+0.00"
 
-    # Logos Index with arrow and point change
-    prev_logos = get_previous_value("logos_index")
+    # Logos Index
     curr_logos = data.get("logos_index")
-    logos_str = f"{curr_logos:.1f}/100" if curr_logos is not None else "—"
-    if prev_logos is not None and curr_logos is not None:
-        delta = curr_logos - prev_logos
-        arrow = get_arrow(delta)
-        logos_str += f"  {arrow}"
-    else:
-        logos_str += "  —"
 
-    # DEX VOL with change vs previous snapshot
-    prev_dex = get_previous_value("dex_volume")
-    curr_dex = data.get("dex_volume")
-    dex_str = fmt_large(curr_dex)
-    if prev_dex and curr_dex and prev_dex > 0:
-        dex_change = ((curr_dex - prev_dex) / prev_dex) * 100
-        dex_str += f"   {fmt_pct(dex_change)} {get_arrow(dex_change)}"
+    # Stablecoin mcap — compare to 24h ago (daily rolling figure)
+    prev_sc = get_value_24h_ago("stablecoin_mcap")
+    curr_sc = data.get("stablecoin_mcap")
+    if prev_sc and curr_sc and prev_sc > 0:
+        sc_change_str = fmt_with_arrow(((curr_sc - prev_sc) / prev_sc) * 100)
     else:
-        dex_str += "   —"
+        sc_change_str = "+0.0% •"
+
+    # DEX VOL — compare to 24h ago (daily rolling figure)
+    prev_dex = get_value_24h_ago("dex_volume")
+    curr_dex = data.get("dex_volume")
+    if prev_dex and curr_dex and prev_dex > 0:
+        dex_change_str = fmt_with_arrow(((curr_dex - prev_dex) / prev_dex) * 100)
+    else:
+        dex_change_str = "+0.0% •"
+
+    logos_str = f"{curr_logos:.1f} / 100" if curr_logos is not None else "—"
+    L = 15  # label column width
 
     lines = [
-        "ARISTOTLE · SUI LOGOS",
-        f"{now.strftime('%d %b %Y')} · {session}",
+        "ARISTOTLE · LYCEUM REPORT",
+        f"{now.strftime('%a %d %b %Y')} · {session}",
         sep,
-        "",
-        f"SUI            {fmt_price(data.get('sui_price'))}     {fmt_pct(data.get('sui_price_change_24h'))} {get_arrow(data.get('sui_price_change_24h') or 0)}",
-        f"TVL            {fmt_large(data.get('tvl'))}   {fmt_pct(data.get('tvl_change_24h'))} {get_arrow(data.get('tvl_change_24h') or 0)}",
-        f"DEX VOL        {dex_str}",
-        f"DEEPBOOK       {db_str}",
-        f"MEAN REV       {mr_str}",
-        "",
+        f"{'METRIC':<{L}}{'VALUE':<{V}}  24H ▲▼",
+        sep,
+        f"{'SUI':<{L}}{fmt_price(data.get('sui_price')):<{V}}  {fmt_with_arrow(data.get('sui_price_change_24h'))}",
+        f"{'TVL':<{L}}{fmt_large(data.get('tvl')):<{V}}  {fmt_with_arrow(data.get('tvl_change_24h'))}",
+        f"{'STABLECOIN':<{L}}{fmt_large(curr_sc):<{V}}  {sc_change_str}",
+        f"{'DEX VOL':<{L}}{fmt_large(curr_dex):<{V}}  {dex_change_str}",
+        f"{'DEEPBOOK':<{L}}{fmt_large(curr_db):<{V}}  {db_change_str}",
+        f"{'MEAN REV':<{L}}{mr_val:<{V}}  {mr_change_str}",
         sep,
         f"LOGOS INDEX    {logos_str}",
         sep,
     ]
+
+    driver = data.get("logos_driver", "")
+    if driver:
+        for i, part in enumerate(driver.split("\n\n")):
+            if i > 0:
+                lines.append("")
+            lines.append(f"/ {part}")
+
+    curr_mr = data.get("mean_reversion")
+    if curr_mr is not None:
+        lines.append("")
+        lines.append(f"/ {mean_rev_interpretation(curr_mr)}")
+
     if commentary:
         lines.append("")
         lines.append(commentary)
-    return "\n".join(lines)
+
+    lines.append(sep)
+    lines.append(f"{'aristotle.report':>{len(sep)}}")
+
+    return f"<pre>{chr(10).join(lines)}</pre>"
 
 
 # ─────────────────────────────────────────
@@ -827,7 +1170,7 @@ def post_to_telegram(channel_id: str, message: str) -> bool:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": channel_id,
-        "text": f"<pre>{message}</pre>",
+        "text": message,
         "parse_mode": "HTML",
     }
     try:
@@ -865,6 +1208,14 @@ def run():
 
     data = {**cg, **dl, **sc, **db, **staking, **tx}
 
+    # If SUI price missing, use last known good value from DB
+    if not data.get("sui_price"):
+        last_price = get_previous_value("sui_price")
+        if last_price:
+            data["sui_price"] = last_price
+            data["sui_price_change_24h"] = None
+            log.warning(f"SUI price fetch failed — using last known: ${last_price:.4f}")
+
     # If DeepBook returned 0 or None, use last known good value from DB
     if not data.get("deepbook_liquidity"):
         last_db = get_previous_value("deepbook_liquidity")
@@ -872,10 +1223,30 @@ def run():
             data["deepbook_liquidity"] = last_db
             log.warning(f"DeepBook fetch returned 0 — using last known value: ${last_db:,.0f}")
 
-    # Calculate 7-day EMA for DeepBook
+    # If DEX volume missing, use last known good value from DB
+    if not data.get("dex_volume"):
+        last_dex = get_previous_value("dex_volume")
+        if last_dex and last_dex > 0:
+            data["dex_volume"] = last_dex
+            log.warning(f"DEX volume fetch failed — using last known value: ${last_dex:,.0f}")
+
+    # Calculate 7-day EMA for DeepBook and DEX volume
     data["deepbook_ema"] = calculate_deepbook_ema(data.get("deepbook_liquidity") or 0)
     log.info(f"DeepBook EMA (7d): {data['deepbook_ema']:,.0f}")
+    data["dex_ema"] = calculate_dex_ema(data.get("dex_volume") or 0)
+    log.info(f"DEX vol EMA (7d): {data['dex_ema']:,.0f}")
     data["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Switch all changes to session-to-session (vs previous DB snapshot)
+    prev_sui = get_previous_value("sui_price")
+    if prev_sui and data.get("sui_price") and prev_sui > 0:
+        data["sui_price_change_24h"] = ((data["sui_price"] - prev_sui) / prev_sui) * 100
+        log.info(f"SUI session change: {data['sui_price_change_24h']:+.2f}%")
+
+    prev_tvl = get_previous_value("tvl")
+    if prev_tvl and data.get("tvl") and prev_tvl > 0:
+        data["tvl_change_24h"] = ((data["tvl"] - prev_tvl) / prev_tvl) * 100
+        log.info(f"TVL session change: {data['tvl_change_24h']:+.2f}%")
 
     # Mean reversion
     price_history = get_price_history(days=20)
@@ -893,9 +1264,13 @@ def run():
         data["tx_12h_delta"] = None
 
     # Logos Index
+    prev_top_two = _get_prev_top_two()
     prev_index = get_previous_value("logos_index")
-    data["logos_index"] = calculate_logos_index(data, previous_index=prev_index)
-    log.info(f"Logos Index: {data['logos_index']}")
+    logos_result = calculate_logos_index(data, previous_index=prev_index, prev_top_two=prev_top_two)
+    data["logos_index"]  = logos_result["score"]
+    data["logos_driver"] = logos_result["driver_line"]
+    log.info(f"Logos Index: {data['logos_index']} | {data['logos_driver']}")
+    log.info(f"Contributions: { {k: round(v, 1) for k, v in logos_result['contributions'].items()} }")
 
     commentary = generate_closing_line(data)
     log.info(f"Commentary: {commentary or '(none)'}")
