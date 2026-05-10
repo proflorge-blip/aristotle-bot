@@ -198,6 +198,23 @@ def get_previous_value(column: str):
     except Exception:
         return None
 
+def get_value_24h_ago(column: str):
+    """Return the value from the snapshot closest to 24 hours ago."""
+    try:
+        from datetime import timedelta
+        conn = get_db_conn()
+        c = conn.cursor()
+        target = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        c.execute(
+            f"SELECT {column} FROM snapshots_v3 WHERE timestamp <= %s ORDER BY timestamp DESC LIMIT 1",
+            (target,)
+        )
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
 def get_previous_values(*columns) -> dict:
     try:
         conn = get_db_conn()
@@ -1014,7 +1031,7 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
     L = 11  # label column width
     V = 9   # value column width
 
-    prev_dex = get_previous_value("dex_volume")
+    prev_dex = get_value_24h_ago("dex_volume")
     curr_dex = data.get("dex_volume")
     if prev_dex and curr_dex and prev_dex > 0:
         dex_change_str = fmt_with_arrow(((curr_dex - prev_dex) / prev_dex) * 100)
@@ -1027,8 +1044,7 @@ def format_free_brief(data: dict, commentary: str = "") -> str:
     prev_logos = get_previous_value("logos_index")
     logos_delta = (logos - prev_logos) if (logos is not None and prev_logos is not None) else None
 
-    prev_dex_val = get_previous_value("dex_volume")
-    dex_pct = ((curr_dex - prev_dex_val) / prev_dex_val * 100) if (prev_dex_val and curr_dex and prev_dex_val > 0) else None
+    dex_pct = ((curr_dex - prev_dex) / prev_dex * 100) if (prev_dex and curr_dex and prev_dex > 0) else None
 
     observation = agora_logos_observation(
         logos, logos_delta,
@@ -1067,15 +1083,15 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     sep = "─" * 26
     V = 9  # value column width
 
-    # DeepBook
-    prev_db = get_previous_value("deepbook_liquidity")
+    # DeepBook — compare to 24h ago (daily rolling figure)
+    prev_db = get_value_24h_ago("deepbook_liquidity")
     curr_db = data.get("deepbook_liquidity")
     if prev_db and curr_db and prev_db > 0:
         db_change_str = fmt_with_arrow(((curr_db - prev_db) / prev_db) * 100)
     else:
         db_change_str = "+0.0% •"
 
-    # Mean reversion
+    # Mean reversion — compare to previous session (tracks momentum shift)
     prev_mr = get_previous_value("mean_reversion")
     curr_mr = data.get("mean_reversion")
     mr_val = f"{curr_mr:+.2f}σ" if curr_mr is not None else "—"
@@ -1088,16 +1104,16 @@ def format_paid_brief(data: dict, commentary: str = "") -> str:
     # Logos Index
     curr_logos = data.get("logos_index")
 
-    # Stablecoin mcap
-    prev_sc = get_previous_value("stablecoin_mcap")
+    # Stablecoin mcap — compare to 24h ago (daily rolling figure)
+    prev_sc = get_value_24h_ago("stablecoin_mcap")
     curr_sc = data.get("stablecoin_mcap")
     if prev_sc and curr_sc and prev_sc > 0:
         sc_change_str = fmt_with_arrow(((curr_sc - prev_sc) / prev_sc) * 100)
     else:
         sc_change_str = "+0.0% •"
 
-    # DEX VOL
-    prev_dex = get_previous_value("dex_volume")
+    # DEX VOL — compare to 24h ago (daily rolling figure)
+    prev_dex = get_value_24h_ago("dex_volume")
     curr_dex = data.get("dex_volume")
     if prev_dex and curr_dex and prev_dex > 0:
         dex_change_str = fmt_with_arrow(((curr_dex - prev_dex) / prev_dex) * 100)
